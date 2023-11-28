@@ -8,8 +8,8 @@ By: Zack Beucler
 
 # Notable features
 
-- **Multiple Tracks:** _TRex Valley_ and _Dinosaur Boneyard_.
-- **Two game modes:** __single__  where you are alone and __multi__ where you race 3 NPCs.
+- **Multiple Tracks:** _TRex Valley_ and _Dinosaur Boneyard_. More to come.
+- **Two game modes:** _single_  where you race alone and _multi_ where you race 3 NPCs.
 
 # Installation
 
