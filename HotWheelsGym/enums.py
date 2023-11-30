@@ -1,4 +1,7 @@
-class Tracks:
+import enum
+
+
+class Tracks(enum.Enum):
     """
     Tracks to race on
     """
@@ -7,7 +10,7 @@ class Tracks:
     Dino_Boneyard = "Dinosaur_Boneyard"
 
 
-class RaceMode:
+class RaceMode(enum.Enum):
     """
     Racing modes
     """

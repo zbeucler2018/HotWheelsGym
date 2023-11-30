@@ -1,15 +1,21 @@
 import retro
-from retro import RetroEnv
-from .enums import Tracks, RaceMode
+
+from .enums import RaceMode, Tracks
 
 
-class HotWheelsEnv(RetroEnv):
+class HotWheelsEnv(retro.RetroEnv):
     """
     RL enviroment for the GBA game 'Hot Wheels Stunt Track Challenge'
     """
 
-    def __init__(self, track: Tracks = Tracks.Dino_Boneyard, mode: RaceMode = RaceMode.MULTI, total_laps: int = 3, **retro_kwargs) -> None:
-        self.GAME_NAME = "HotWheelsStuntTrackChallenge-gba"
+    def __init__(
+        self,
+        track: Tracks = Tracks.Dino_Boneyard,
+        mode: RaceMode = RaceMode.MULTI,
+        total_laps: int = 3,
+        **retro_kwargs,
+    ) -> None:
+        self.GAME_NAME = "HotWheelsStuntTrackChallenge-GBAdvance"
         self.track = track
         self.mode = mode
         self.total_laps = total_laps
@@ -33,10 +39,10 @@ class HotWheelsEnv(RetroEnv):
         # with the correct state and info
         super().__init__(
             game=self.GAME_NAME,
-            state=f"{track}_{mode}.state",
+            state=f"{self.track.value}_{self.mode.value}.state",
             info=retro.data.get_file_path(
                 self.GAME_NAME,
-                f"{self.track}_{self.mode}.json",
+                f"{self.track.value}_{self.mode.value}.json",
                 retro.data.Integrations.ALL,
             ),
             inttype=retro.data.Integrations.ALL,
