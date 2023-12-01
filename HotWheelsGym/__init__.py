@@ -6,7 +6,7 @@ import retro
 from .enums import RaceMode, Tracks
 from .HotWheels import HotWheelsEnv
 
-GAME_NAME = "HotWheelsStuntTrackChallenge-GBAdvance"
+GAME_NAME = "HotWheelsStuntTrackChallenge-GbAdvance"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 __all__ = ["import_rom", "make", "HotWheelsEnv"]

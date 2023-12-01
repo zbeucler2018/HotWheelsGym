@@ -15,7 +15,7 @@ class HotWheelsEnv(retro.RetroEnv):
         total_laps: int = 3,
         **retro_kwargs,
     ) -> None:
-        self.GAME_NAME = "HotWheelsStuntTrackChallenge-GBAdvance"
+        self.GAME_NAME = "HotWheelsStuntTrackChallenge-GbAdvance"
         self.track = track
         self.mode = mode
         self.total_laps = total_laps
