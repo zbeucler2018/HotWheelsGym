@@ -17,4 +17,16 @@ By: Zack Beucler
 
 # Basic usage
 
-- tbd
+```python3
+import HotWheelsGym
+from HotWheelsGym.enums import Tracks, RaceModes
+
+# only need to import the ROM once
+HotWheelsGym.import_rom("path/to/rom.gba")
+
+env = HotWheelsGym.make(
+  track=Tracks.Dino_Boneyard,
+  mode=RaceModes.MULTI,
+  laps=3
+)
+```

@@ -1,4 +1,5 @@
 import os
+import shutil
 
 import retro
 
@@ -11,12 +12,18 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 __all__ = ["import_rom", "make", "HotWheelsEnv"]
 
 
-def import_rom(rom_file_path) -> None:
+def import_rom(path_to_rom) -> None:
     """
-    Copy the ROM into retro
+    Copy the ROM file into the custom game integration folder
     """
-    # os.system(f"{python_executable} -m retro.import {rom_file_path}")
-    return
+    _custom_integration_path = os.path.join(SCRIPT_DIR, GAME_NAME, "rom.gba")
+
+    abs_rom_path = os.path.abspath(path_to_rom)
+    assert abs_rom_path.endswith("rom.gba"), "ROM import path must end with rom.gba"
+    
+    if not os.path.isfile(_custom_integration_path):
+        print(f"Copying {abs_rom_path} to {_custom_integration_path}")
+        shutil.copy(abs_rom_path, _custom_integration_path)
 
 
 def make(track: Tracks, mode: RaceMode, total_laps: int = 3, **kwargs):
