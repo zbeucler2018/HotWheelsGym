@@ -1,7 +1,7 @@
 
 function isGameOver()
 	-- end of game
-	if data.lap >= 4 then
+	if data.lap > 3 then
 		return true
 	else
 		return false
