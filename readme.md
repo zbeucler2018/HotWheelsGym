@@ -13,11 +13,15 @@ By: Zack Beucler
 
 # Installation
 
-- tbd
+```bash
+git clone https://github.com/zbeucler2018/HotWheelsGym.git
+cd HotWheelsGym
+pip install -e . # [train,dev]
+```
 
 # Basic usage
 
-```python3
+```python
 import HotWheelsGym
 from HotWheelsGym.enums import Tracks, RaceModes
 

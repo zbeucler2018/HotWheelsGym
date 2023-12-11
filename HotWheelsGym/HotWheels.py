@@ -1,5 +1,6 @@
-import retro
 from pprint import pprint
+
+import retro
 
 from .enums import RaceMode, Tracks
 

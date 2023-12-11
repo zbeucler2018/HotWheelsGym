@@ -1,0 +1,31 @@
+[project]
+name = "HotWheelsGym"
+version = "0.0.1"
+description = "HotWheelsGym is a gymnasium enviroment for the 2005 GBA game 'Hot Wheels Stunt Track Challenge'"
+authors = [
+  { name="Zack Beucler", email="zbeucler@gmail.com" },
+]
+readme = "readme.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License"
+]
+# Required libraries
+dependencies = [
+    "stable-retro"
+]
+# Optional dependencies
+[project.optional-dependencies]
+dev = ["black", "isort", "mypy"]
+train = ["stable-baselines3"]
+
+# Specify the HotWheelsGym package
+[tool.setuptools.packages.find]
+include = ["HotWheelsGym"]
+
+# Use setuptools
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
