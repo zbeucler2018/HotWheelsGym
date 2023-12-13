@@ -1,8 +1,11 @@
+import os
 from pprint import pprint
 
 import retro
 
 from .enums import RaceMode, Tracks
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 class HotWheelsEnv(retro.RetroEnv):
@@ -21,9 +24,28 @@ class HotWheelsEnv(retro.RetroEnv):
         self.track = track
         self.mode = mode
         self.total_laps = total_laps
+        self._inttype = retro.data.Integrations.ALL
 
         if track == Tracks.TRex_Valley and mode == RaceMode.MULTI:
             raise NotImplementedError(f"Can only play SINGLE on the TRex_Valley track")
+        if track == Tracks.Dino_Boneyard and mode == RaceMode.SINGLE:
+            raise NotImplementedError(f"Can only play MULTI on the Dino_Boneyard track")
+
+        # Integrate custom game into stable-retro.
+        # retro has a bug that it will only look for
+        # the rom in the custom integrations folder
+        # immedately after integration and will not after
+        retro.data.Integrations.add_custom_path(SCRIPT_DIR)
+
+        if not self.GAME_NAME in retro.data.list_games(self._inttype):
+            raise Exception(f"The game was not successfully integrated into retro")
+
+        # Check retro can find the ROM
+        try:
+            retro.data.get_romfile_path(self.GAME_NAME, self._inttype)
+        except FileNotFoundError:
+            if not retro.data.get_file_path(self.GAME_NAME, "rom.sha", self._inttype):
+                raise
 
         # init the RetroEnv parent
         # with the correct state and info
@@ -33,17 +55,17 @@ class HotWheelsEnv(retro.RetroEnv):
             info=retro.data.get_file_path(
                 self.GAME_NAME,
                 f"{self.track.value}_{self.mode.value}.json",
-                retro.data.Integrations.ALL,
+                self._inttype,
             ),
-            inttype=retro.data.Integrations.ALL,
+            inttype=self._inttype,
             **retro_kwargs,
         )
 
     def step(self, action):
         _obs, _rew, _term, _trun, _info = super().step(action)
 
-        # Fix the raw integrated speed
-        # TODO: Make this much better lol
+        # A very rough estimate to
+        # fix the raw integrated speed
         _info["speed"] = int(_info["speed"] * 0.702)
 
         # pprint(_info)
