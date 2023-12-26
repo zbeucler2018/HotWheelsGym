@@ -23,14 +23,44 @@ pip install -e . # [train,dev]
 
 ```python
 import HotWheelsGym
-from HotWheelsGym.enums import Tracks, RaceModes
+from HotWheelsGym import HotWheelsEnv, Tracks, RaceModes
 
 # only need to import the ROM once
 HotWheelsGym.import_rom("path/to/rom.gba")
 
-env = HotWheelsGym.make(
+env = HotWheelsEnv(
   track=Tracks.Dino_Boneyard,
   mode=RaceModes.MULTI,
   laps=3
 )
+
+# OR
+
+env = HotWheelsGym.make("HWSTC-dino_boneyard-multi-3")
 ```
+
+# Enviroment
+
+Use the template
+```
+HWSTC-<track>-<mode>-<laps>
+```
+where:
+
+- `<track>` is the name of the track
+- `<mode>` is the game mode {`single`, `multi`}
+- `<laps>` is the total amount of laps {`1`, `2`, `3`}
+
+## Track Varients
+
+| Name | Map |
+| ---- | ----- |
+| `trex_valley` | <img height="200px" width="200px" src="media/trex_valley_minimap.png"/> |
+| `dino_boneyard` | <img height="200px" width="200px" src="media/dino_boneyard_minimap.png"/> |
+
+## Game Mode Varients
+
+| Mode | Desc. |
+| ------ | ---- |
+| `single` | Single player. Race by yourself. |
+| `multi`  | Multi player. Race against 3 NPCs. |

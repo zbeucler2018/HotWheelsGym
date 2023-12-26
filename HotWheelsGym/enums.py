@@ -6,8 +6,8 @@ class Tracks(enum.Enum):
     Tracks to race on
     """
 
-    TRex_Valley = "TRex_Valley"
-    Dino_Boneyard = "Dinosaur_Boneyard"
+    TRex_Valley = "trex_valley"
+    Dino_Boneyard = "dino_boneyard"
 
 
 class RaceMode(enum.Enum):
