@@ -26,8 +26,6 @@ class HotWheelsEnv(retro.RetroEnv):
         self.total_laps = total_laps
         self._inttype = retro.data.Integrations.ALL
 
-        if track == Tracks.TRex_Valley and mode == RaceMode.MULTI:
-            raise NotImplementedError(f"Can only play SINGLE on the TRex_Valley track")
         if track == Tracks.Dino_Boneyard and mode == RaceMode.SINGLE:
             raise NotImplementedError(f"Can only play MULTI on the Dino_Boneyard track")
 
