@@ -1,29 +1,51 @@
 import argparse
+import os
+from pathlib import Path
 
 import gymnasium as gym
+import HotWheelsGym
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CallbackList
+from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import (SubprocVecEnv, VecFrameStack,
                                               VecTransposeImage)
+
 from tools import Config, get_random_name
+from tools.evaluation import EvalCallback
+from tools.wrappers import HotWheelsDiscretizer, HotWheelsWrapper
 
-from HotWheelsGym import HotWheelsEnv
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = f"{SCRIPT_DIR}/data"
+LOG_DIR = f"{DATA_DIR}/logs"
+MODEl_SAVE_PATH = f"{DATA_DIR}/models"
+BEST_MODEL_SAVE_PATH = f"{DATA_DIR}/best_models"
 
-# from tools.wrappers import HotWheelsDiscretizer
-
+INFO_VARS = ("score", "speed", "progress")
 
 
 def train(cfg: Config) -> None:
     def make_env() -> gym.Env:
         """Util to create envs for vec envs"""
-        _env = HotWheelsEnv.make(
+        _env = HotWheelsGym.make(
             id=cfg.env_id,
             render_mode="rgb_array",
         )
 
-        # if cfg.action_space: # apply custom action space
-        #     _env = HotWheelsDiscretizer(_env, action_space=cfg.action_space)
-        # _env = HotWheelsWrapper(_env)
+        if cfg.action_space:  # apply custom action space
+            _env = HotWheelsDiscretizer(_env, combos=cfg.action_space)
+        _env = HotWheelsWrapper(
+            _env,
+            frame_skip=cfg.frame_skip,
+            frame_skip_prob=cfg.frame_skip_prob,
+            use_nature_cnn=cfg.nature_env,
+            clip_reward=cfg.nature_env,
+            crash_reward=cfg.crash_reward,
+            wall_crash_reward=cfg.wall_crash_reward,
+            terminate_on_crash=cfg.terminate_on_crash,
+            terminate_on_wall_crash=cfg.terminate_on_wall_crash,
+            max_episode_steps=cfg.max_episode_steps,
+        )
+        _env = Monitor(_env, info_keywords=INFO_VARS)
         return _env
 
     # Vectorize env
@@ -38,7 +60,9 @@ def train(cfg: Config) -> None:
         # if applied before
         for indx, t_state in enumerate(cfg.training_states):
             _ = venv.env_method(
-                method_name="load_state", statename=t_state, indices=indx
+                method_name="load_state",
+                statename=str(Path(t_state).absolute()),
+                indices=indx,
             )
             _ = venv.env_method(method_name="reset_emulator_data", indices=indx)
         _ = venv.reset()
@@ -59,7 +83,7 @@ def train(cfg: Config) -> None:
             clip_range=cfg.clip_range,
             ent_coef=cfg.ent_coef,
             verbose=1,
-            tensorboard_log="./data/logs/tf/",
+            tensorboard_log=f"{LOG_DIR}/tf/{cfg.run_id}",
         )
 
     # Callbacks
@@ -67,10 +91,10 @@ def train(cfg: Config) -> None:
 
     eval_callback = EvalCallback(
         venv,
-        best_model_save_path=f"./data/best_models/{cfg.run_id}",
-        log_path=f"./data/evaluation/{cfg.run_id}",
+        best_model_save_path=f"{BEST_MODEL_SAVE_PATH}/{cfg.run_id}",
+        log_path=f"{DATA_DIR}/evaluation/{cfg.run_id}",
         eval_freq=cfg.eval_freq,
-        eval_statename=cfg.evaluation_statename,
+        eval_state_path=str(Path(cfg.eval_state_path).absolute()),
         deterministic=True,
         render=cfg.render_eval,
     )
@@ -86,12 +110,12 @@ def train(cfg: Config) -> None:
             sync_tensorboard=True,
             resume=True if cfg.load_model_path else None,
             id=cfg.run_id,
-            dir="./data/logs/wandb/",
+            dir=f"{LOG_DIR}/wandb",
         )
 
         wandb_callback = WandbCallback(
             # gradient_save_freq=50_000,
-            model_save_path=cfg.model_save_path,
+            model_save_path=f"{MODEl_SAVE_PATH}/{cfg.run_id}",
             model_save_freq=cfg.model_save_freq,
             verbose=1,
         )
@@ -126,5 +150,7 @@ if __name__ == "__main__":
     if not cfg.run_id:
         cfg.run_id = get_random_name()
         print(f"New training run {cfg.run_id}")
+
+    print(cfg)
 
     train(cfg)

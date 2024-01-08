@@ -2,7 +2,7 @@ import gymnasium as gym
 import numpy as np
 
 
-class Discretizer(gym.ActionWrapper):
+class HotWheelsDiscretizer(gym.ActionWrapper):
     """
     Discretizes multibinary action spaces.
     Borrowed from: https://github.com/Farama-Foundation/stable-retro/blob/master/retro/examples/discretizer.py

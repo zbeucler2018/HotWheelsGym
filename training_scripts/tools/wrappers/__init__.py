@@ -1,3 +1,3 @@
-from .action import Discretizer, StochasticFrameSkip
+from .action import HotWheelsDiscretizer, StochasticFrameSkip
 from .hotwheels import HotWheelsWrapper
 from .obs import MiniMapObservation, TrimmedObservation

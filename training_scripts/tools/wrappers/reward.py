@@ -1,4 +1,6 @@
 import gymnasium as gym
+import numpy as np
+
 
 class RewardOnCrash(gym.Wrapper):
     """
@@ -17,6 +19,7 @@ class RewardOnCrash(gym.Wrapper):
 
         return observation, reward, terminated, truncated, info
 
+
 class RewardOnWallCrash(gym.Wrapper):
     """
     A wrapper that rewards the agent when it crashes into a wall.
@@ -32,3 +35,15 @@ class RewardOnWallCrash(gym.Wrapper):
             reward += self.wall_crash_reward
 
         return observation, reward, terminated, truncated, info
+
+
+class ClipReward(gym.RewardWrapper):
+    """
+    Clip the reward to {+1, 0, -1} by its sign.
+    """
+
+    def __init__(self, env: gym.Env) -> None:
+        super().__init__(env)
+
+    def reward(self, reward: float) -> float:
+        return np.sign(float(reward))

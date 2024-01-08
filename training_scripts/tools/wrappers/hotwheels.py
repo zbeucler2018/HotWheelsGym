@@ -1,10 +1,10 @@
 import gymnasium as gym
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.atari_wrappers import ClipRewardEnv, WarpFrame
+from gymnasium.wrappers import GrayScaleObservation, ResizeObservation
 from gymnasium.wrappers.time_limit import TimeLimit
 
 from .action import StochasticFrameSkip
-from .reward import RewardOnCrash, RewardOnWallCrash
+from .reward import ClipReward, RewardOnCrash, RewardOnWallCrash
+
 
 class HotWheelsWrapper(gym.Wrapper):
     """
@@ -36,7 +36,6 @@ class HotWheelsWrapper(gym.Wrapper):
         terminate_on_wall_crash: bool = True,
         max_episode_steps: int = 5_100,
     ) -> None:
-        
         if frame_skip > 1:
             env = StochasticFrameSkip(env, frame_skip, frame_skip_prob)
         if terminate_on_crash:
@@ -50,12 +49,10 @@ class HotWheelsWrapper(gym.Wrapper):
         if max_episode_steps:
             env = TimeLimit(env, max_episode_steps)
         if use_nature_cnn:
-            env = WarpFrame(env, width=84, height=84)
+            env = GrayScaleObservation(env, keep_dim=True)
+            env = ResizeObservation(env, (84, 84))
         if clip_reward:
-            env = ClipRewardEnv(env)
-
-        # always apply a Monitor as the LAST wrapper
-        env = Monitor(env, info_keywords=('score'))
+            env = ClipReward(env)
 
         super().__init__(env)
 
@@ -89,6 +86,7 @@ class TerminateOnCrash(gym.Wrapper):
             terminated = True
 
         return observation, reward, terminated, truncated, info
+
 
 class TerminateOnWallCrash(gym.Wrapper):
     """

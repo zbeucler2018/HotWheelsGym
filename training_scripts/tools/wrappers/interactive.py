@@ -10,21 +10,16 @@ Render to video: python3 -m retro.scripts.playback_movie Airstriker-Genesis-Leve
 """
 
 import abc
-import argparse
 import ctypes
 import sys
 import time
 
+import HotWheelsGym
 import numpy as np
 import pyglet
+from HotWheelsGym.enums import RaceMode, Tracks
 from pyglet import gl
 from pyglet.window import key as keycodes
-
-import retro
-
-import HotWheelsGym
-from HotWheelsGym.enums import Tracks, RaceMode
-
 
 
 class Interactive(abc.ABC):
@@ -282,7 +277,6 @@ def main():
     _mode = RaceMode.MULTI
     _laps = 1
 
-    
     ia = RetroInteractive(
         track=_track,
         mode=_mode,

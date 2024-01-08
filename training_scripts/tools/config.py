@@ -1,7 +1,7 @@
 import pprint
+from pathlib import Path
 
 import yaml
-
 from HotWheelsGym import RaceMode, Tracks
 
 
@@ -85,6 +85,8 @@ class Config:
         """Step freq in which to evaluate the model"""
         self.render_eval: bool
         """Whether to display the evaluation"""
+        self.eval_state_path: str
+        """Filepath to evaluation state"""
 
         # Misc
         self.use_wandb: bool
@@ -97,7 +99,7 @@ class Config:
         if file_path:
             self.load_file_config(file_path)
 
-        self.check_config_is_valid()
+        self.validate_config()
 
     def load_file_config(self, file_path):
         """
@@ -108,8 +110,6 @@ class Config:
 
         # Create class variables for each field in the config file
         for key, value in config_data.items():
-            if key == "eval_freq":
-                setattr(self, key, max(value // self.num_envs, 1))
             setattr(self, key, value)
 
     def __repr__(self) -> str:
@@ -118,7 +118,7 @@ class Config:
         formatted_properties = pprint.pformat(properties, sort_dicts=False)
         return formatted_properties
 
-    def check_config_is_valid(self) -> None:
+    def validate_config(self) -> None:
         """
         Throws exception if the config doesn't meet
         the rules below
@@ -136,3 +136,21 @@ class Config:
             raise ValueError(
                 f"The amount of training states ({len(self.training_states)}) must be the same as the amount of envs ({self.num_envs}) used for training."
             )
+
+        # Ensure training state file paths are valid
+        if self.training_states:
+            for state in self.training_states:
+                if not Path(state).absolute().exists():
+                    raise ValueError(
+                        f"The training state {state} ({Path(state).absolute()}) does not exist"
+                    )
+
+        # Ensure evaluation state file paths are valid
+        if self.eval_state_path:
+            if not Path(self.eval_state_path).absolute().exists():
+                raise ValueError(
+                    f"The evaluation state {self.eval_state_path} ({Path(self.eval_state_path).absolute()}) does not exist"
+                )
+            
+        if self.eval_freq:
+            self.eval_freq = max(self.eval_freq // self.num_envs, 1)

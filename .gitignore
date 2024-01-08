@@ -1,6 +1,15 @@
 # ROM
 *.gba
 
+*.whl
+
+training_scripts/data/logs/*
+training_scripts/data/models/*
+training_scripts/data/best_models/*
+training_scripts/data/evaluation/*
+
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
