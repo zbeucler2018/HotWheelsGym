@@ -1,0 +1,81 @@
+---
+
+run_id: 
+
+# Env
+env_id: HWSTC-trex_valley-single-1
+num_envs: 15
+
+action_space: 
+  - []
+  - ["A"]
+  - ["UP"]
+  - ["DOWN"]
+  - ["LEFT"]
+  - ["RIGHT"]
+  - ["L", "R"]
+
+
+# Env termination / truncation
+max_episode_steps: 5100
+terminate_on_crash: True
+terminate_on_wall_crash: True
+
+frame_stack: 4
+
+# Frame skipping
+frame_skip: 4
+frame_skip_prob: 0.25
+
+# Env obs
+trim_obs: False
+minimap_obs: False
+
+# Reward
+crash_reward: -5
+wall_crash_reward: -5
+
+# File paths to training states
+training_states: 
+  - ./data/states/trex_valley_single_61.state
+  - ./data/states/trex_valley_single_87.state
+  - ./data/states/trex_valley_single_130.state
+  - ./data/states/trex_valley_single_178.state
+  - ./data/states/trex_valley_single.state
+  - ./data/states/trex_valley_single_61.state
+  - ./data/states/trex_valley_single_87.state
+  - ./data/states/trex_valley_single_130.state
+  - ./data/states/trex_valley_single_178.state
+  - ./data/states/trex_valley_single.state
+  - ./data/states/trex_valley_single_61.state
+  - ./data/states/trex_valley_single_87.state
+  - ./data/states/trex_valley_single_130.state
+  - ./data/states/trex_valley_single_178.state
+  - ./data/states/trex_valley_single.state
+
+load_model_path:
+model_save_freq: 50000
+# model_save_path: ./data/models/
+# best_model_save_path: ./data/best_models/
+
+total_training_steps: 20000000
+
+# hyperparameters from 'Proximal Policy Optimization Algorithms' paper (https://arxiv.org/pdf/1707.06347.pdf)
+# learning_rate is lambda f: f * 2.5e-4
+policy: CnnPolicy
+n_steps: 128
+batch_size: 32
+n_epochs: 4
+gamma: 0.99
+gae_lambda: 0.95
+clip_range: 0.1
+ent_coef: 0.01
+
+# Evaluation
+eval_freq: 200000
+render_eval: False
+eval_state_path: ./data/states/trex_valley_single.state
+
+use_wandb: True
+nature_env: True
+config_filepath:

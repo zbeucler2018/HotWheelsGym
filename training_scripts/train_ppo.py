@@ -146,6 +146,8 @@ if __name__ == "__main__":
 
     cfg = Config(file_path=args.config)
 
+    HotWheelsGym.import_rom(f"{DATA_DIR}/rom.gba")
+
     # Generate a new run ID if training new model
     if not cfg.run_id:
         cfg.run_id = get_random_name()
