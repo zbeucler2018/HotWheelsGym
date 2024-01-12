@@ -1,0 +1,28 @@
+{
+  "info": {
+    "boost": {
+      "address": 33583080,
+      "type": "<u2"
+    },
+    "hit_wall": {
+      "address": 33583152,
+      "type": "|u1"
+    },
+    "lap": {
+      "address": 33583154,
+      "type": "|u1"
+    },
+    "progress": {
+      "address": 33583168,
+      "type": "|u2"
+    },
+    "score": {
+      "address": 33583432,
+      "type": "<u2"
+    },
+    "speed": {
+      "address": 33583073,
+      "type": "|u1"
+    }
+  }
+}

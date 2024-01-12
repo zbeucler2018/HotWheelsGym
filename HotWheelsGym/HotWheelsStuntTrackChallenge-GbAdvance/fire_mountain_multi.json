@@ -1,0 +1,16 @@
+{
+  "info": {
+    "hit_wall": {
+      "address": 33583248,
+      "type": "|u1"
+    },
+    "lap": {
+      "address": 33583250,
+      "type": "|u1"
+    },
+    "rank": {
+      "address": 33583249,
+      "type": "|u1"
+    }
+  }
+}
