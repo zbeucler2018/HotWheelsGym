@@ -26,9 +26,6 @@ class HotWheelsEnv(retro.RetroEnv):
         self.total_laps = total_laps
         self._inttype = retro.data.Integrations.ALL
 
-        if track == Tracks.Dino_Boneyard and mode == RaceMode.SINGLE:
-            raise NotImplementedError(f"Can only play MULTI on the Dino_Boneyard track")
-
         # Integrate custom game into stable-retro.
         # retro has a bug that it will only look for
         # the rom in the custom integrations folder

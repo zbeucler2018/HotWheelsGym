@@ -14,7 +14,7 @@
     },
     "progress": {
       "address": 33583232,
-      "type": "|u1"
+      "type": "|u3"
     },
     "score": {
       "address": 33583496,
