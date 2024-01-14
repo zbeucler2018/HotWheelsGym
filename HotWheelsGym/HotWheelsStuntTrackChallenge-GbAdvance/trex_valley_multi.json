@@ -12,14 +12,6 @@
       "address": 33583346,
       "type": "|u1"
     },
-    "score": {
-      "address": 33583624,
-      "type": "<=i4"
-    },
-    "npc_score": {
-      "address": 33586198,
-      "type": ">=u4"
-    },
     "progress": {
       "address": 33583360,
       "type": "=i2"
@@ -27,6 +19,10 @@
     "rank": {
       "address": 33590624,
       "type": "|i1"
+    },
+    "score": {
+      "address": 33583624,
+      "type": "<=i4"
     },
     "speed": {
       "address": 33583265,

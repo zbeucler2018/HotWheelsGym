@@ -1,5 +1,7 @@
 # Hot Wheels Gymnasium Environment
+
 By: Zack Beucler
+
 <p align="left">
   <img width="100%" src="./media/6-dbm_slow_20m_flawless.gif"></img>
 </p>
@@ -8,7 +10,7 @@ By: Zack Beucler
 
 # Notable features
 
-- **Multiple Tracks:** _TRex Valley_, _Dino Boneyard_, _Black Widows Nest_, and _Insect Hive_. More to come.
+- **Multiple Tracks:** 10 tracks to race on.
 - **Two game modes:** _single_  where you race alone and _multi_ where you race against 3 NPCs.
 
 # Installation
@@ -53,10 +55,10 @@ where:
 
 ## Track Varients
 
-| Name | Map |
+| Name | Map | 
 | ---- | ----- |
-| `trex_valley` | <img height="200px" width="200px" src="media/trex_valley_minimap.png"/> |
-| `dino_boneyard` | <img height="200px" width="200px" src="media/dino_boneyard_minimap.png"/> |
+| `trex_valley` | <img height="200px" width="200px" src="media/trex_valley_minimap.png" /> |
+| `dino_boneyard` | <img height="200px" width="200px" src="media/dino_boneyard_minimap.png" /> |
 | `black_widows_nest` | <img height="200px" width="200px" src="media/black_widows_nest_minimap.png" /> |
 | `insect_hive` | <img height="200px" width="200px" src="media/insect_hive_minimap.png" /> |
 | `monsters_of_the_deep` | <img height="200px" width="200px" src="media/monsters_of_the_deep_minimap.png" /> |
@@ -92,10 +94,17 @@ where:
 
 ### Progress per lap
 
-- The progress value at each lap
-
-| Lap # | `trex_valley` | `dino_boneyard` | `black_widows_nest` | `insect_hive` | `monsters_of_the_deep` | `whiteskull_cliffs` | `jungle_snakepit` | `gator_forest` | `satellite_mission` | `solar_strip` | `fire_mountain` | `volcano_battle` |
-| ----- | ------------- | --------------- | ------------------- | ------------- | ---------------------- | ------------------- | ----------------- | -------------- | --- | --- | --- | --- |
-| `1` | 317 | 342 | 395 | 380 | 343 | 340 | 465 | 512 | 376 | 325 | 465 | 495 |
-| `2` | 633 | 684 | 789 | 759 | 685 | 679 | 930 | 1024 | 752 | 650 | 930 | 990 |
-| `3` | 949 | 1024 | 1183 | 1138 | 1027 | 1018 | 1395 | 1536 | 1128 | 975 | 1395 | 1485 |
+| Track | Progress per lap |
+| ----- | --- |
+| `trex_valley` | 316 |
+| `dino_boneyard` | 342 |
+| `black_widows_nest` | 395 |
+| `insect_hive` | 380 |
+| `monsters_of_the_deep` | 342 |
+| `whiteskull_cliffs` | 340 |
+| `jungle_snakepit` | 465 |
+| `gator_forest` | 512 |
+| `satellite_mission` | 376 |
+| `solar_strip` | 325 |
+| `fire_mountain` | 465 |
+| `volcano_battle` | 495 |
