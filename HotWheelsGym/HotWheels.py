@@ -1,5 +1,4 @@
 import os
-from pprint import pprint
 
 import retro
 
@@ -63,7 +62,13 @@ class HotWheelsEnv(retro.RetroEnv):
         # fix the raw integrated speed
         _info["speed"] = int(_info["speed"] * 0.702)
 
-        # pprint(_info)
+        # Integrated value is 0 for False and 1 for True
+        _info["hit_wall"] = bool(_info["hit_wall"])
+
+        # The integrated 'rank' variable maps
+        # first place to 0, second to 1, etc.
+        if self.mode == RaceMode.MULTI:
+            _info["rank"] += 1
 
         # Terminate the env if the agent reaches the
         # specified lap limit
