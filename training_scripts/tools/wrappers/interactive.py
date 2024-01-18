@@ -12,15 +12,17 @@ Render to video: python3 -m retro.scripts.playback_movie Airstriker-Genesis-Leve
 import abc
 import argparse
 import ctypes
+from pprint import pprint
 import sys
 import time
 
-import HotWheelsGym
 import numpy as np
 import pyglet
-from HotWheelsGym.enums import RaceMode, Tracks
 from pyglet import gl
 from pyglet.window import key as keycodes
+
+import HotWheelsGym
+from HotWheelsGym.enums import RaceMode, Tracks
 
 
 class Interactive(abc.ABC):
@@ -137,7 +139,8 @@ class Interactive(abc.ABC):
 
             if not self._sync or act is not None:
                 obs, rew, terminated, truncated, _info = self._env.step(act)
-                print(f"Progress: {_info['progress']} lap: {_info['lap']}")
+                #print(f"checkpoint: {_info['checkpoint']} lap: {_info['lap']}")
+                pprint(_info)
                 done = terminated or truncated
                 self._image = self.get_image(obs, self._env)
                 self._episode_returns += rew
@@ -236,7 +239,7 @@ class RetroInteractive(Interactive):
     Interactive setup for retro games
     """
 
-    def __init__(self, track, mode, total_laps, env_id = ""):
+    def __init__(self, track, mode, total_laps, env_id=""):
         if env_id:
             env = HotWheelsGym.make(id=env_id, render_mode="human")
         else:
@@ -282,9 +285,9 @@ def main():
     args = parser.parse_args()
 
     # default options
-    _track = Tracks.Volcano_Battle
-    _mode = RaceMode.SINGLE
-    _laps = 1
+    _track = Tracks.Satellite_Mission
+    _mode = RaceMode.MULTI
+    _laps = 2
 
     ia = RetroInteractive(
         env_id=args.id,
