@@ -79,7 +79,7 @@ def evaluate_policy(
         called after each step. Gets locals() and globals() passed as parameters.
     :param reward_threshold: Minimum expected reward per episode,
         this will raise an error if the performance is not met
-    :param return_episode_rewards: If True, a list of rewards, episode lengths, and agent progress
+    :param return_episode_rewards: If True, a list of rewards, episode lengths, and agent checkpoint
         per episode will be returned instead of the mean.
     :param warn: If True (default), warns user about lack of a Monitor wrapper in the
         evaluation environment.
@@ -111,7 +111,7 @@ def evaluate_policy(
     episode_info = {
         "episode_rewards": [],
         "episode_lengths": [],
-        "episode_progresses": [],
+        "episode_checkpoints": [],
         "episode_scores": [],
         "episode_laps": [],
     }
@@ -161,7 +161,7 @@ def evaluate_policy(
                             episode_info["episode_lengths"].append(info["episode"]["l"])
                             # Only increment at the real end of an episode
                             episode_counts[i] += 1
-                        episode_info["episode_progresses"].append(info["progress"])
+                        episode_info["episode_checkpoints"].append(info["checkpoint"])
                         episode_info["episode_laps"].append(info["lap"])
                         episode_info["episode_scores"].append(info["score"])
                     else:

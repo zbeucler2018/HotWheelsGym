@@ -163,7 +163,7 @@ class EvalCallback(EventCallback):
             mean_ep_length, std_ep_length = np.mean(
                 episode_info["episode_lengths"]
             ), np.std(episode_info["episode_lengths"])
-            mean_progress = np.mean(episode_info["episode_progresses"])
+            mean_checkpoint = np.mean(episode_info["episode_checkpoints"])
             mean_laps = np.mean(episode_info["episode_laps"])
             mean_scores = np.mean(episode_info["episode_scores"])
 
@@ -175,13 +175,13 @@ class EvalCallback(EventCallback):
                     f"episode_reward={mean_reward:.2f} +/- {std_reward:.2f}"
                 )
                 print(f"Episode length: {mean_ep_length:.2f} +/- {std_ep_length:.2f}")
-                print(f"Episode progress: {mean_progress}")
+                print(f"Episode checkpoint: {mean_checkpoint}")
                 print(f"Episode score: {mean_scores}")
                 print(f"Episode laps: {mean_laps}")
             # Add to current Logger
             self.logger.record("eval/mean_reward", float(mean_reward))
             self.logger.record("eval/mean_ep_length", mean_ep_length)
-            self.logger.record("eval/mean_progress", mean_progress)
+            self.logger.record("eval/mean_checkpoint", mean_checkpoint)
             self.logger.record("eval/mean_laps", mean_laps)
 
             # Dump log so the evaluation results are printed with the correct timestep

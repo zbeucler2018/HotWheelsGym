@@ -87,14 +87,14 @@ where:
 | `boost` | `int` | The current amount of boost the agent has. `980` is the max and will allow the agent to use the boost. |
 | `hit_wall` | `bool` | `True` if the agent currently collided with a wall, `False` if not. |
 | `lap` | `int` | The current lap the agent is on. |
-| `progress` | `int` | The agent's current progress through the track. |
+| `checkooint` | `int` | The checkpoint the agent is currently at on the track. |
 | `rank` | `int` | The current rank of the agent in the race. `multi` mode only. |
 | `score` | `int` | The current score of the agent. |
 | `speed` | `int` | The agent's current (estimated) speed. |
 
 ### Progress per lap
 
-| Track | Progress per lap |
+| Track | Checkpoints per lap |
 | ----- | --- |
 | `trex_valley` | 316 |
 | `dino_boneyard` | 342 |

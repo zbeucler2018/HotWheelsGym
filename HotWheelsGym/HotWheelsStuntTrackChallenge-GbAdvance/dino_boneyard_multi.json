@@ -16,7 +16,7 @@
       "address": 33586198,
       "type": ">=u4"
     },
-    "progress": {
+    "checkpoint": {
       "address": 33583360,
       "type": "=i2"
     },

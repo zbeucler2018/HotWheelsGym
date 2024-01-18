@@ -14,18 +14,18 @@ function isDone()
 end
 
 
-previous_progress = 0
-function calculateProgressReward()
-	local current_progress = data.progress
+previous_checkpoint = 0
+function calculatecheckpointReward()
+	local current_checkpoint = data.checkpoint
 	local delta = 0
-	if current_progress > previous_progress then
+	if current_checkpoint > previous_checkpoint then
 		delta = 1
-		previous_progress = current_progress
+		previous_checkpoint = current_checkpoint
 	end
 	return delta
 end
 
 
 function calculateReward()
-	return calculateProgressReward()
+	return calculatecheckpointReward()
 end

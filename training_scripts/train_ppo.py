@@ -20,7 +20,7 @@ LOG_DIR = f"{DATA_DIR}/logs"
 MODEl_SAVE_PATH = f"{DATA_DIR}/models"
 BEST_MODEL_SAVE_PATH = f"{DATA_DIR}/best_models"
 
-INFO_VARS = ("score", "speed", "progress")
+INFO_VARS = ("score", "speed", "checkpoint")
 
 
 def train(cfg: Config) -> None:
