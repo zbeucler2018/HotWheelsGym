@@ -92,7 +92,7 @@ where:
 | `score` | `int` | The current score of the agent. |
 | `speed` | `int` | The agent's current (estimated) speed. |
 
-### Progress per lap
+### Checkpoints per lap
 
 | Track | Checkpoints per lap |
 | ----- | --- |
