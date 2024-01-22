@@ -1,0 +1,28 @@
+{
+  "info": {
+    "boost": {
+      "address": 33583096,
+      "type": "<u4"
+    },
+    "hit_wall": {
+      "address": 33583168,
+      "type": "|u1"
+    },
+    "lap": {
+      "address": 33583170,
+      "type": "|u1"
+    },
+    "checkpoint": {
+      "address": 33583184,
+      "type": "|u2"
+    },
+    "score": {
+      "address": 33583448,
+      "type": "<u4"
+    },
+    "speed": {
+      "address": 33583089,
+      "type": "<u2"
+    }
+  }
+}
