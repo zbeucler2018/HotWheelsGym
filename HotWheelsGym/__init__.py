@@ -27,7 +27,7 @@ def import_rom(path_to_rom) -> None:
 def make(id: str, **kwargs) -> HotWheelsEnv:
     """Make a HotWheelsEnv from an ID"""
     try:
-        _, track, mode, laps = id.split("-")
+        track, mode, laps = id.split("-")
     except ValueError:
         print(
             f"Got ID with invalid format {id}. The correct format is HWSTC-<track>-<mode>-<laps>"

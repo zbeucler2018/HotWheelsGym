@@ -11,7 +11,7 @@ from stable_baselines3.common.vec_env import (SubprocVecEnv, VecFrameStack,
                                               VecTransposeImage)
 
 from tools import Config, get_random_name
-from tools.evaluation import EvalCallback
+from tools.evaluation import EvalCallback, RotateStateCallback
 from tools.wrappers import HotWheelsDiscretizer, HotWheelsWrapper
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
