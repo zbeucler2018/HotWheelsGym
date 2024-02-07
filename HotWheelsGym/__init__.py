@@ -46,8 +46,6 @@ def make(id: str, **kwargs) -> HotWheelsEnv:
         print(f"ERROR! Got invalid lap {laps}")
         return
 
-    print(f"Creating {Tracks(track).value} {RaceMode(mode).value} {int(laps)}")
-
     return HotWheelsEnv(
         track=Tracks(track),
         mode=RaceMode(mode),
