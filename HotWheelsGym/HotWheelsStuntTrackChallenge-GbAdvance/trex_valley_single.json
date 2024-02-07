@@ -1,28 +1,28 @@
 {
   "info": {
+    "boost": {
+      "address": 33583256,
+      "type": "<u2"
+    },
     "checkpoint": {
       "address": 33583344,
-      "type": "=i2"
-    },
-    "score": {
-      "address": 33583608,
-      "type": "<=i4"
-    },
-    "speed": {
-      "address": 33583249,
-      "type": "=u2"
-    },
-    "boost": {
-      "address": 2007094,
-      "type": "=i4"
-    },
-    "lap": {
-      "address": 33583330,
-      "type": "|i1"
+      "type": "<u2"
     },
     "hit_wall": {
       "address": 33583328,
-      "type": "><n1"
+      "type": "<u1"
+    },
+    "lap": {
+      "address": 33583330,
+      "type": "<u1"
+    },
+    "score": {
+      "address": 33583608,
+      "type": "<u2"
+    },
+    "speed": {
+      "address": 33583249,
+      "type": "<u2"
     }
   }
 }

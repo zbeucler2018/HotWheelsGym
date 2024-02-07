@@ -2,27 +2,27 @@
   "info": {
     "boost": {
       "address": 33583272,
-      "type": "<=i4"
-    },
-    "hit_wall": {
-      "address": 33583344,
-      "type": "><n1"
-    },
-    "lap": {
-      "address": 33583346,
-      "type": "|u1"
+      "type": "<u2"
     },
     "checkpoint": {
       "address": 33583360,
-      "type": "=i2"
+      "type": "<u2"
+    },
+    "hit_wall": {
+      "address": 33583344,
+      "type": "<u1"
+    },
+    "lap": {
+      "address": 33583346,
+      "type": "<u1"
     },
     "rank": {
       "address": 33590624,
-      "type": "|i1"
+      "type": "<u1"
     },
     "score": {
       "address": 33583624,
-      "type": "<=i4"
+      "type": "<u2"
     },
     "speed": {
       "address": 33583265,

@@ -2,7 +2,11 @@
   "info": {
     "boost": {
       "address": 33583144,
-      "type": "=u2"
+      "type": "<u2"
+    },
+    "checkpoint": {
+      "address": 33583232,
+      "type": "<u2"
     },
     "hit_wall": {
       "address": 33583216,
@@ -12,17 +16,13 @@
       "address": 33583218,
       "type": "|u1"
     },
-    "checkpoint": {
-      "address": 33583232,
-      "type": "|u3"
-    },
     "score": {
       "address": 33583496,
-      "type": "<u4"
+      "type": "<u2"
     },
     "speed": {
       "address": 33583137,
-      "type": "|u1"
+      "type": "<u2"
     }
   }
 }
