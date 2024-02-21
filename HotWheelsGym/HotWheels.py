@@ -98,6 +98,6 @@ class HotWheelsEnv(retro.RetroEnv):
 
 
     def reset(self, **kwargs):
-        super().reset(**kwargs)
         self._total_steps = 0
         self._episode_speeds = []
+        return super().reset(**kwargs)
