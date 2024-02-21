@@ -26,5 +26,5 @@ class RaceMode(enum.Enum):
     Racing modes
     """
 
-    SINGLE = "single"  # Play as the only car on the track. Trex Valley only!
-    MULTI = "multi"  # Play against other NPCs
+    SINGLE = "single"  # Play as the only car on the track
+    MULTI = "multi"  # Play against 3 other NPCs
