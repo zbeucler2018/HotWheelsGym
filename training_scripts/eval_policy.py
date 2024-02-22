@@ -8,31 +8,15 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack, VecTransposeImage, SubprocVecEnv
 from stable_baselines3.common.monitor import Monitor
 import pandas as pd
+from torch.utils.tensorboard import SummaryWriter
 
 import HotWheelsGym
+from HotWheelsGym import RaceMode, Tracks
 
-from tools import Config
+from tools import Config, random_name_generator
 from tools.evaluation import evaluate_policy
-from tools.wrappers import HotWheelsWrapper, HotWheelsDiscretizer
+from tools.wrappers import HotWheelsWrapper, HotWheelsDiscretizer, SpeedReward
 
-
-# def evaluate_agent(
-#         model,
-#         env,
-#         n_episodes: int = 5,
-#         render: bool = False,
-
-# ):
-#     """
-#     Evaluates a model in an env
-
-#     :model      | The model to evaluate
-#     :env        | The env to use
-#     :n_episodes | Number of episodes to evaluate
-#     :render     | Whether to render the evaluations
-#     """
-
-    
 
 
 @dataclass
@@ -47,8 +31,8 @@ def main(run: Run) -> None:
     config_path = run.config_path
 
     cfg = Config(config_path)
-    cfg.env_id = "HWSTC-trex_valley-multi-3"
-    #cfg.terminate_on_wall_crash = False
+    cfg.env_id = f"HWSTC-{Tracks.Dino_Boneyard.value}-{RaceMode.MULTI.value}-1"
+    # cfg.terminate_on_wall_crash = False
     cfg.training_states = []
 
     def make_env():
@@ -71,19 +55,34 @@ def main(run: Run) -> None:
     venv = VecTransposeImage(
         VecFrameStack(
             DummyVecEnv([make_env]),
-            # SubprocVecEnv([make_env] * 10),
+            # SubprocVecEnv([make_env] * 2),
             n_stack=cfg.frame_stack)
     )
 
 
     model = PPO.load(path=model_path, env=venv)
 
-    num_eps = 2
+    writer = SummaryWriter(log_dir=f"{SCRIPT_DIR}/tmp/exp_{random_name_generator.get_random_name()}")
+
+    def stats_callback(_locals, _globals):
+        """
+        Logs evaluation metrics to tensorboard
+
+        tensorboard --logdir training_scripts/tmp/
+        """
+        writer.add_scalar("eval/reward", _locals["rewards"][0], _locals["total_steps"])
+        writer.add_scalar("eval/speed", _locals["info"]["speed"], _locals["total_steps"])
+        writer.add_scalar("eval/score", _locals["info"]["score"], _locals["total_steps"])
+        writer.add_scalar("eval/rank", _locals["info"]["rank"], _locals["total_steps"])
+        #print(_locals)
+
+    num_eps = 1
     output = evaluate_policy(
         model=model,
         env=venv,
         n_eval_episodes=num_eps,
         deterministic=False,
+        callback=stats_callback,
         render=True,
     )
 

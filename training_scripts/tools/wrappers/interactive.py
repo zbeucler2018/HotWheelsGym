@@ -139,8 +139,6 @@ class Interactive(abc.ABC):
 
             if not self._sync or act is not None:
                 obs, rew, terminated, truncated, _info = self._env.step(act)
-                #print(f"checkpoint: {_info['checkpoint']} lap: {_info['lap']}")
-                pprint(_info)
                 done = terminated or truncated
                 self._image = self.get_image(obs, self._env)
                 self._episode_returns += rew
@@ -157,7 +155,7 @@ class Interactive(abc.ABC):
                     )
                     self._prev_episode_returns = self._episode_returns
                     mess = f"steps={self._steps} episode_steps={self._episode_steps} episode_returns_delta={episode_returns_delta} episode_returns={self._episode_returns}"
-                    print(mess)
+                    # pprint(_info)
 
                 if done:
                     self._env.reset()
@@ -241,7 +239,9 @@ class RetroInteractive(Interactive):
 
     def __init__(self, track, mode, total_laps, env_id=""):
         if env_id:
-            env = HotWheelsGym.make(id=env_id, render_mode="human")
+            # env = SpeedReward(HotWheelsGym.make(id=env_id, render_mode="rgb_array"))
+            env = HotWheelsGym.make(id=env_id, render_mode="rgb_array")
+
         else:
             env = HotWheelsGym.HotWheelsEnv(
                 track=track,
