@@ -8,7 +8,7 @@ from stable_baselines3.common.callbacks import BaseCallback, EventCallback
 from stable_baselines3.common.vec_env import (DummyVecEnv, VecEnv,
                                               sync_envs_normalization)
 
-from .evaluate_policy import evaluate_policy, evaluate_policy_on_state
+from .evaluate_policy import evaluate_policy
 
 
 class EvalCallback(EventCallback):
@@ -33,11 +33,10 @@ class EvalCallback(EventCallback):
         according to performance on the eval env will be saved.
     :param deterministic: Whether the evaluation should
         use a stochastic or deterministic actions.
-    :paaram eval_statename: State to evaluate on
+    :paaram evaluation_state_file: State to evaluate on
     :param render: Whether to render or not the environment during evaluation
     :param verbose: Verbosity level: 0 for no output, 1 for indicating information about evaluation results
-    :param warn: Passed to ``evaluate_policy`` (warns if ``eval_env`` has not been
-        wrapped with a Monitor wrapper)
+
     """
 
     def __init__(
@@ -50,10 +49,9 @@ class EvalCallback(EventCallback):
         log_path: Optional[str] = None,
         best_model_save_path: Optional[str] = None,
         deterministic: bool = True,
-        eval_state_path: str = "",
+        evaluation_state_file: Optional[str] = None,
         render: bool = False,
         verbose: int = 1,
-        warn: bool = True,
     ):
         super().__init__(callback_after_eval, verbose=verbose)
 
@@ -66,10 +64,9 @@ class EvalCallback(EventCallback):
         self.eval_freq = eval_freq
         self.best_mean_reward = -np.inf
         self.last_mean_reward = -np.inf
-        self.eval_state_path = eval_state_path
+        self.evaluation_state_file = evaluation_state_file
         self.deterministic = deterministic
         self.render = render
-        self.warn = warn
 
         # Convert to VecEnv for consistency
         if not isinstance(eval_env, VecEnv):
@@ -117,30 +114,17 @@ class EvalCallback(EventCallback):
                         "see https://stable-baselines3.readthedocs.io/en/master/guide/callbacks.html#evalcallback "
                         "and warning above."
                     ) from e
+            
+            # Run evaluations
+            episode_info = evaluate_policy(
+                model=self.model,
+                env=self.eval_env,
+                n_eval_episodes=self.n_eval_episodes,
+                render=self.render,
+                deterministic=self.deterministic,
+                evaluation_state_file=self.evaluation_state_file,
+            )
 
-            # evaluate on eval_state_path if specified
-            if self.eval_state_path:
-                episode_info = evaluate_policy_on_state(
-                    model=self.model,
-                    env=self.eval_env,
-                    n_eval_episodes=self.n_eval_episodes,
-                    render=self.render,
-                    deterministic=self.deterministic,
-                    return_episode_rewards=True,
-                    warn=self.warn,
-                    eval_state_path=self.eval_state_path,
-                )
-            else:
-                # eval on training state if not specified
-                episode_info = evaluate_policy(
-                    model=self.model,
-                    env=self.eval_env,
-                    n_eval_episodes=self.n_eval_episodes,
-                    render=self.render,
-                    deterministic=self.deterministic,
-                    return_episode_rewards=True,
-                    warn=self.warn,
-                )
 
             if self.log_path is not None:
                 self.evaluations_timesteps.append(self.num_timesteps)
@@ -157,15 +141,20 @@ class EvalCallback(EventCallback):
                     **kwargs,
                 )
 
+            # Calculate metrics
             mean_reward, std_reward = np.mean(episode_info["episode_rewards"]), np.std(
                 episode_info["episode_rewards"]
             )
             mean_ep_length, std_ep_length = np.mean(
                 episode_info["episode_lengths"]
             ), np.std(episode_info["episode_lengths"])
+
             mean_checkpoint = np.mean(episode_info["episode_checkpoints"])
             mean_laps = np.mean(episode_info["episode_laps"])
             mean_scores = np.mean(episode_info["episode_scores"])
+            mean_rank = np.mean(episode_info["rank"])
+            mean_speed = np.mean(episode_info["episode_speed"])
+            mean_duration = np.mean(episode_info["episode_duration_s"])
 
             self.last_mean_reward = mean_reward
 
@@ -178,11 +167,19 @@ class EvalCallback(EventCallback):
                 print(f"Episode checkpoint: {mean_checkpoint}")
                 print(f"Episode score: {mean_scores}")
                 print(f"Episode laps: {mean_laps}")
+                print(f"Episode rank: {mean_rank}")
+                print(f"Episode speed: {mean_speed}")
+                print(f"Episode duration (s): {mean_duration}")
             # Add to current Logger
             self.logger.record("eval/mean_reward", float(mean_reward))
             self.logger.record("eval/mean_ep_length", mean_ep_length)
             self.logger.record("eval/mean_checkpoint", mean_checkpoint)
             self.logger.record("eval/mean_laps", mean_laps)
+            self.logger.record("eval/mean_scores", mean_scores)
+            self.logger.record("eval/mean_rank", mean_rank)
+            self.logger.record("eval/mean_speed", mean_speed)
+            self.logger.record("eval/mean_duration", mean_duration)
+
 
             # Dump log so the evaluation results are printed with the correct timestep
             self.logger.record(

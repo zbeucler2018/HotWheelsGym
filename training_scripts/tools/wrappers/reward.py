@@ -2,6 +2,25 @@ import gymnasium as gym
 import numpy as np
 
 
+class SpeedReward(gym.Wrapper):
+    """
+    A wrapper that rewards the agent 30% for speed 70% for progress
+    """
+
+    def __init__(self, env):
+        self.MAX_SPEED = 300
+        super().__init__(env)
+
+    def step(self, action):
+        observation, reward, terminated, truncated, info = self.env.step(action)
+
+        speed_reward = (info["speed"] / self.MAX_SPEED) * 0.3
+        checkpoint_reward = reward * 0.7
+        _reward = speed_reward + checkpoint_reward
+        return observation, _reward, terminated, truncated, info
+
+
+
 class RewardOnCrash(gym.Wrapper):
     """
     A wrapper that rewards the agent when it fails a trick.

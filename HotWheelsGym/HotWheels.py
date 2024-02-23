@@ -1,4 +1,5 @@
 import os
+from statistics import mean
 
 import retro
 
@@ -24,6 +25,10 @@ class HotWheelsEnv(retro.RetroEnv):
         self.mode = mode
         self.total_laps = total_laps
         self._inttype = retro.data.Integrations.ALL
+        self._total_steps = 0
+        self._target_fps = 60
+        self._episode_speeds = []
+
 
         # Integrate custom game into stable-retro.
         # retro has a bug that it will only look for
@@ -58,9 +63,9 @@ class HotWheelsEnv(retro.RetroEnv):
     def step(self, action):
         _obs, _rew, _term, _trun, _info = super().step(action)
 
-        # A very rough estimate to
-        # fix the raw integrated speed
-        _info["speed"] = int(_info["speed"] * 0.702)
+        self._total_steps += 1
+        
+        _info["speed"] = int(_info["speed"])
 
         # Integrated value is 0 for False and 1 for True
         _info["hit_wall"] = bool(_info["hit_wall"])
@@ -72,13 +77,27 @@ class HotWheelsEnv(retro.RetroEnv):
 
         # Terminate the env if the agent reaches the
         # specified lap limit
-        if int(_info["lap"]) > self.total_laps:
+        if _info["lap"] > self.total_laps:
             _term = True
 
-        # NOTE: sometimes, stable-retro's code isn't in sync
-        # with the emulator. this means that
-        # the lua done condition might not detect immedately
-        if int(_info["lap"]) == 4:
+        # NOTE: Sometimes, stable-retro's code isn't in sync
+        # with the emulator. This means that the lua done condition 
+        # might not detect immedately
+        if _info["lap"] == 4:
             _info["lap"] = self.total_laps
 
+        # Calculate some statistics
+        # Average speed
+        self._episode_speeds.append(_info["speed"])
+        _info["average_speed"] = mean(self._episode_speeds)
+
+        # Race duration
+        _info["race_duration_s"] = self._total_steps / self._target_fps
+
         return _obs, _rew, _term, _trun, _info
+
+
+    def reset(self, **kwargs):
+        self._total_steps = 0
+        self._episode_speeds = []
+        return super().reset(**kwargs)
