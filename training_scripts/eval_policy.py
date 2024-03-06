@@ -15,7 +15,7 @@ from HotWheelsGym import RaceMode, Tracks
 
 from tools import Config, random_name_generator
 from tools.evaluation import evaluate_policy
-from tools.wrappers import HotWheelsWrapper, HotWheelsDiscretizer, SpeedReward
+from tools.wrappers import HotWheelsWrapper, HotWheelsDiscretizer, SpeedReward, Viewer
 
 
 
@@ -50,6 +50,7 @@ def main(run: Run) -> None:
             terminate_on_wall_crash=cfg.terminate_on_wall_crash,
             max_episode_steps=cfg.max_episode_steps,
         )
+        _env = Viewer(_env)
         return Monitor(_env)
     
     venv = VecTransposeImage(
@@ -82,8 +83,8 @@ def main(run: Run) -> None:
         env=venv,
         n_eval_episodes=num_eps,
         deterministic=False,
-        callback=stats_callback,
-        render=True,
+        callback=None, #stats_callback,
+        render=False,
     )
 
     pprint(output)
