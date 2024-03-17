@@ -5,14 +5,14 @@ from pathlib import Path
 import gymnasium as gym
 import HotWheelsGym
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import CallbackList
+from stable_baselines3.common.callbacks import CallbackList, StopTrainingOnRewardThreshold
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import (SubprocVecEnv, VecFrameStack,
                                               VecTransposeImage)
 
 from tools import Config, get_random_name
 from tools.evaluation import EvalCallback
-from tools.wrappers import HotWheelsDiscretizer, HotWheelsWrapper
+from tools.wrappers import HotWheelsDiscretizer, HotWheelsWrapper, SpeedReward
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = f"{SCRIPT_DIR}/data"
@@ -45,6 +45,8 @@ def train(cfg: Config) -> None:
             terminate_on_wall_crash=cfg.terminate_on_wall_crash,
             max_episode_steps=cfg.max_episode_steps,
         )
+        if cfg.use_speed_reward:
+            _env = SpeedReward(_env)
         _env = Monitor(_env, info_keywords=INFO_VARS)
         return _env
 
@@ -94,9 +96,10 @@ def train(cfg: Config) -> None:
         best_model_save_path=f"{BEST_MODEL_SAVE_PATH}/{cfg.run_id}",
         log_path=f"{DATA_DIR}/evaluation/{cfg.run_id}",
         eval_freq=cfg.eval_freq,
-        eval_state_path=str(Path(cfg.eval_state_path).absolute()),
+        evaluation_state_file=str(Path(cfg.eval_state_path).absolute()),
         deterministic=True,
         render=cfg.render_eval,
+        callback_on_new_best=StopTrainingOnRewardThreshold(cfg.training_reward_threshold, verbose=1) if cfg.training_reward_threshold else None
     )
     _callbacks.append(eval_callback)
 
@@ -114,7 +117,7 @@ def train(cfg: Config) -> None:
         )
 
         wandb_callback = WandbCallback(
-            # gradient_save_freq=50_000,
+            gradient_save_freq=50_000,
             model_save_path=f"{MODEl_SAVE_PATH}/{cfg.run_id}",
             model_save_freq=cfg.model_save_freq,
             verbose=1,

@@ -49,6 +49,8 @@ class Config:
         """Reward amount given each time the agent crashes when failing a trick"""
         self.wall_crash_reward: float
         """Reward amount given each time the agent crashes into a wall"""
+        self.use_speed_reward: bool
+        """Use the speed wrapper or not"""
 
         # Training states
         self.training_states: list[str]
@@ -68,6 +70,8 @@ class Config:
 
         self.total_training_steps: int
         """Total steps for the model to train"""
+        self.training_reward_threshold: int
+        """Reward threshold to stop training"""
 
         # model parameters
         self.policy: str

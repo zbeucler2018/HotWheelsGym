@@ -152,8 +152,8 @@ class EvalCallback(EventCallback):
             mean_checkpoint = np.mean(episode_info["episode_checkpoints"])
             mean_laps = np.mean(episode_info["episode_laps"])
             mean_scores = np.mean(episode_info["episode_scores"])
-            mean_rank = np.mean(episode_info["rank"])
-            mean_speed = np.mean(episode_info["episode_speed"])
+            mean_rank = np.mean(episode_info["episode_rank"])
+            mean_speed = np.mean(episode_info["episode_avg_speed"])
             mean_duration = np.mean(episode_info["episode_duration_s"])
 
             self.last_mean_reward = mean_reward
