@@ -18,6 +18,24 @@ from tools.evaluation import evaluate_policy
 from tools.wrappers import HotWheelsWrapper, HotWheelsDiscretizer, SpeedReward
 
 
+# def write_to_file(f_path: str, ):
+#     with open(f_path, "w") as f:
+#         f.write("indx,episode_duration,episode_reward\n")
+#         for indx, el in enumerate(ep_lengths):
+#             f.write(f"{indx}, {el}, {rew[indx]}\n")
+
+# Tenorboard
+# writer = SummaryWriter(log_dir=f"{SCRIPT_DIR}/tmp/exp_{random_name_generator.get_random_name()}")
+# def stats_callback(_locals, _globals):
+#     """
+#     Logs evaluation metrics to tensorboard
+
+#     tensorboard --logdir training_scripts/tmp/
+#     """
+#     writer.add_scalar("eval/reward", _locals["rewards"][0], _locals["total_steps"])
+#     writer.add_scalar("eval/speed", _locals["info"]["speed"], _locals["total_steps"])
+#     writer.add_scalar("eval/score", _locals["info"]["score"], _locals["total_steps"])
+#     writer.add_scalar("eval/rank", _locals["info"]["rank"], _locals["total_steps"])
 
 @dataclass
 class Run:
@@ -62,18 +80,7 @@ def main(run: Run) -> None:
 
     model = PPO.load(path=model_path, env=venv)
 
-    writer = SummaryWriter(log_dir=f"{SCRIPT_DIR}/tmp/exp_{random_name_generator.get_random_name()}")
 
-    def stats_callback(_locals, _globals):
-        """
-        Logs evaluation metrics to tensorboard
-
-        tensorboard --logdir training_scripts/tmp/
-        """
-        writer.add_scalar("eval/reward", _locals["rewards"][0], _locals["total_steps"])
-        writer.add_scalar("eval/speed", _locals["info"]["speed"], _locals["total_steps"])
-        writer.add_scalar("eval/score", _locals["info"]["score"], _locals["total_steps"])
-        writer.add_scalar("eval/rank", _locals["info"]["rank"], _locals["total_steps"])
         #print(_locals)
 
     num_eps = 1
@@ -82,17 +89,14 @@ def main(run: Run) -> None:
         env=venv,
         n_eval_episodes=num_eps,
         deterministic=False,
-        callback=stats_callback,
+        callback=None,#stats_callback,
         render=True,
     )
 
     pprint(output)
 
 
-    # with open(run.data_path, "w") as f:
-    #     f.write("indx,episode_duration,episode_reward\n")
-    #     for indx, el in enumerate(ep_lengths):
-    #         f.write(f"{indx}, {el}, {rew[indx]}\n")
+
 
     venv.close()
 
