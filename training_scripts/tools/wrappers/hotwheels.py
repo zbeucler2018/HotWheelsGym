@@ -1,6 +1,6 @@
 import gymnasium as gym
-from gymnasium.wrappers import GrayScaleObservation, ResizeObservation
-from gymnasium.wrappers.time_limit import TimeLimit
+from gymnasium.wrappers import GrayscaleObservation, ResizeObservation
+from gymnasium.wrappers import TimeLimit
 
 from .action import StochasticFrameSkip
 from .reward import ClipReward, RewardOnCrash, RewardOnWallCrash
@@ -49,8 +49,8 @@ class HotWheelsWrapper(gym.Wrapper):
         if max_episode_steps:
             env = TimeLimit(env, max_episode_steps)
         if use_nature_cnn:
-            env = GrayScaleObservation(env, keep_dim=True)
             env = ResizeObservation(env, (84, 84))
+            env = GrayscaleObservation(env, keep_dim=True)
         if clip_reward:
             env = ClipReward(env)
 
