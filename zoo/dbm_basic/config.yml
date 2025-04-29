@@ -34,6 +34,7 @@ minimap_obs: False
 # Reward
 crash_reward: -5
 wall_crash_reward: -5
+use_speed_reward: False
 
 # File paths to training states
 training_states: 
@@ -59,6 +60,7 @@ model_save_freq: 50000
 # best_model_save_path: ./data/best_models/
 
 total_training_steps: 20000000
+training_reward_threshold: 342
 
 # hyperparameters from 'Proximal Policy Optimization Algorithms' paper (https://arxiv.org/pdf/1707.06347.pdf)
 # learning_rate is lambda f: f * 2.5e-4
