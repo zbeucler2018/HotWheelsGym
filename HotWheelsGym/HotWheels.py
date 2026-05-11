@@ -3,7 +3,7 @@ from statistics import mean
 
 import retro
 
-from .enums import RaceMode, Tracks
+from HotWheelsGym.enums import RaceMode, Tracks
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -29,7 +29,6 @@ class HotWheelsEnv(retro.RetroEnv):
         self._target_fps = 60
         self._episode_speeds = []
 
-
         # Integrate custom game into stable-retro.
         # retro has a bug that it will only look for
         # the rom in the custom integrations folder
@@ -46,8 +45,7 @@ class HotWheelsEnv(retro.RetroEnv):
             if not retro.data.get_file_path(self.GAME_NAME, "rom.sha", self._inttype):
                 raise
 
-        # init the RetroEnv parent
-        # with the correct state and info
+        # init the RetroEnv parent with the correct state and info
         super().__init__(
             game=self.GAME_NAME,
             state=f"{self.track.value}_{self.mode.value}.state",
@@ -60,7 +58,8 @@ class HotWheelsEnv(retro.RetroEnv):
             **retro_kwargs,
         )
 
-    def step(self, action):
+    def step(self, action) -> tuple:
+        """Takes a step in the environment and calculate additional statistics."""
         _obs, _rew, _term, _trun, _info = super().step(action)
 
         self._total_steps += 1
@@ -97,7 +96,8 @@ class HotWheelsEnv(retro.RetroEnv):
         return _obs, _rew, _term, _trun, _info
 
 
-    def reset(self, **kwargs):
+    def reset(self, **kwargs) -> tuple:
+        """Reset the environment and clear episode statistics."""
         self._total_steps = 0
         self._episode_speeds = []
         return super().reset(**kwargs)
