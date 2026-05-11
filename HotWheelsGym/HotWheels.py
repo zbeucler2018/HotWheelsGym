@@ -2,6 +2,7 @@ import os
 from statistics import mean
 
 import retro
+import numpy as np
 
 from .enums import RaceMode, Tracks
 
@@ -46,8 +47,7 @@ class HotWheelsEnv(retro.RetroEnv):
             if not retro.data.get_file_path(self.GAME_NAME, "rom.sha", self._inttype):
                 raise
 
-        # init the RetroEnv parent
-        # with the correct state and info
+        # init the RetroEnv parent with the correct state and info
         super().__init__(
             game=self.GAME_NAME,
             state=f"{self.track.value}_{self.mode.value}.state",
@@ -94,10 +94,33 @@ class HotWheelsEnv(retro.RetroEnv):
         # Race duration
         _info["race_duration_s"] = self._total_steps / self._target_fps
 
+        self.last_info = _info
+
         return _obs, _rew, _term, _trun, _info
 
 
     def reset(self, **kwargs):
         self._total_steps = 0
         self._episode_speeds = []
+        self.last_info = {}
         return super().reset(**kwargs)
+    
+
+    def action_masks(self):
+        # All actions allowed by default
+        mask = np.ones(self.action_space.shape, dtype=bool)
+
+        # You should have stored info from the last step
+        boost_ready = self.last_info.get("boost", 0.0) >= 970
+
+        if not boost_ready:
+            # Indexes of 'L' and 'R' 
+            L_idx = 9
+            R_idx = 10
+
+            # Disallow pressing both L and R at the same time
+            # By disabling both individually (forces model to pick only one or neither)
+            mask[L_idx] = False
+            mask[R_idx] = False
+
+        return mask
