@@ -1,0 +1,68 @@
+# uv run train_general_ppo.py --config ./config/general.yaml
+
+run_id: generalized_multi_v1
+
+tracks:
+  - black_widows_nest
+  - dino_boneyard
+  - fire_mountain
+  - gator_forest
+  - insect_hive
+  - jungle_snakepit
+  - monsters_of_the_deep
+  - satellite_mission
+  - solar_strip
+  - trex_valley
+  - volcano_battle
+  - whiteskull_cliffs
+
+mode: multi
+laps: 1
+num_envs: 24
+
+state_dir: /Users/zackbeucler/repos/HotWheelsGym/training_scripts/data/states/generated
+
+action_space:
+  - []
+  - ["A"]
+  - ["A", "LEFT"]
+  - ["A", "RIGHT"]
+  - ["A", "UP"]
+  - ["A", "DOWN"]
+  - ["LEFT"]
+  - ["RIGHT"]
+  - ["UP"]
+  - ["DOWN"]
+  - ["L", "R"]
+  - ["A", "L", "R"]
+
+max_episode_steps: 5100
+terminate_on_crash: True
+terminate_on_wall_crash: True
+
+frame_stack: 4
+frame_skip: 4
+frame_skip_prob: 0.25
+
+trim_obs: False
+minimap_obs: False
+nature_env: True
+
+crash_reward: -5
+wall_crash_reward: -5
+
+load_model_path:
+model_save_freq: 50000
+total_training_steps: 50000000
+
+policy: CnnPolicy
+learning_rate: 0.00025
+n_steps: 128
+batch_size: 256
+n_epochs: 4
+gamma: 0.99
+gae_lambda: 0.95
+clip_range: 0.1
+ent_coef: 0.01
+
+use_wandb: True

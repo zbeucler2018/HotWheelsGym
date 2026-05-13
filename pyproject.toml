@@ -27,6 +27,7 @@ dev = [
 ]
 train = [
   "stable-baselines3>=2.2.1",
+  "pygame",
   "wandb>=0.16.1",
   "PyYAML>=6.0.1",
   "opencv-python>=1.26.3",
