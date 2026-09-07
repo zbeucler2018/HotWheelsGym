@@ -1,8 +1,9 @@
 # Reverse-engineering findings
 
 Status: static, savestate, and headless mGBA analysis reproduced on 2026-09-07.
-The desired-heading command boundary has been dynamically validated. The larger
-CPU-to-player-class mirror patch has not yet been run from a cold race start.
+The desired-heading command boundary and selected-CPU hook have been dynamically
+validated. The larger CPU-to-player-class mirror patch has not yet been run
+from a cold race start.
 
 ## ROM identity
 
@@ -110,6 +111,14 @@ This proves that `+0xE0` is an effective steering-command input rather than
 merely telemetry. The one-instruction probe suppresses the desired-heading
 write for every CPU, so it is not yet the final selected-slot hook.
 
+The production-facing `patch-npc-control` hook checks the CPU racer's vehicle
+index and suppresses the store only for a generated bitmask of indices 1..3.
+For controlled racers it writes the stock computed heading to the otherwise
+zero padding field at `+0x2EE`, making the native waypoint target available to
+the Gym observation. In a 120-frame mGBA test with vehicle 1 selected and held
+at heading `0x680`, slot 1 followed the external heading while slots 2 and 3
+continued to update their stock desired headings and progress normally.
+
 `+0x2F0` is also a live speed command and does not need the heading-store patch.
 In the same 120-frame test, CPU 1's stock target of 59,904 yielded current speed
 59,889 and progress 113. Holding the target at 30,000 yielded current speed
@@ -163,10 +172,10 @@ assumes CPU-specific fields or vtable behavior may expose an incompatibility.
 
 - The CPU-to-player-class mirror patch has not yet been validated from a cold
   race start in mGBA or Stable-Retro.
-- A final hook should control one selected CPU slot rather than replacing all
-  CPU objects or suppressing the heading write for every CPU.
-- The final command API still needs policy-friendly normalization for the
-  12-bit heading and fixed-point target speed.
+- The selected-CPU hook has been tested from a resumed historical race state,
+  but still needs a cold-start Stable-Retro soak test on every track.
+- The current NPC observation/reward is a first training contract and may need
+  additional collision or lap telemetry after initial PPO experiments.
 - The old-HLE IRQ recovery intentionally skips one interrupt handler invocation;
   use the original Stable-Retro 0.9.2-era core for production-faithful playback.
 - A pixel policy still sees the human camera, so model-correct observation is a

@@ -32,14 +32,25 @@ HotWheelsGym.import_rom("path/to/rom.gba")
 
 env = HotWheelsEnv(
   track=Tracks.Dino_Boneyard,
-  mode=RaceModes.MULTI,
-  laps=3
+  mode=RaceMode.MULTI,
+  total_laps=3
 )
 
 # OR
 
 env = HotWheelsGym.make("HWSTC-dino_boneyard-multi-3")
 ```
+
+## Train native NPCs and race your models
+
+The repository includes an experimental `HotWheelsNPCEnv` that controls one
+of the game's native CPU racers through desired-heading and target-speed
+commands. `ModelOpponentEnv` uses the same interface to put trained policies in
+CPU slots while Player 1 remains keyboard/controller-driven.
+
+This requires a locally generated, selected-slot ROM patch; no ROM or generated
+ROM is committed. See [NPC_ENVIRONMENT.md](NPC_ENVIRONMENT.md) for the patch,
+training, and human-vs-model commands.
 
 # Environment
 

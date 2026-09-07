@@ -237,19 +237,20 @@ class RetroInteractive(Interactive):
     Interactive setup for retro games
     """
 
-    def __init__(self, track, mode, total_laps, env_id=""):
-        if env_id:
-            # env = SpeedReward(HotWheelsGym.make(id=env_id, render_mode="rgb_array"))
-            env = HotWheelsGym.make(id=env_id, render_mode="rgb_array")
-
-        else:
-            env = HotWheelsGym.HotWheelsEnv(
-                track=track,
-                mode=mode,
-                total_laps=total_laps,
-                render_mode="rgb_array",
-            )
-        self._buttons = env.buttons
+    def __init__(self, track, mode, total_laps, env_id="", env=None):
+        if env is not None and env_id:
+            raise ValueError("pass either env or env_id, not both")
+        if env is None:
+            if env_id:
+                env = HotWheelsGym.make(id=env_id, render_mode="rgb_array")
+            else:
+                env = HotWheelsGym.HotWheelsEnv(
+                    track=track,
+                    mode=mode,
+                    total_laps=total_laps,
+                    render_mode="rgb_array",
+                )
+        self._buttons = env.unwrapped.buttons
         super().__init__(env=env, sync=False, tps=60, aspect_ratio=4 / 3)
 
     def get_image(self, _obs, env):

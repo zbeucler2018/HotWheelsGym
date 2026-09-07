@@ -41,7 +41,10 @@ class HotWheelsEnv(retro.RetroEnv):
 
         # Check retro can find the ROM
         try:
-            retro.data.get_romfile_path(self.GAME_NAME, self._inttype)
+            get_original_rom = getattr(retro.data, "get_original_romfile_path", None)
+            if get_original_rom is None:
+                get_original_rom = retro.data.get_romfile_path
+            self.rom_path = get_original_rom(self.GAME_NAME, self._inttype)
         except FileNotFoundError:
             if not retro.data.get_file_path(self.GAME_NAME, "rom.sha", self._inttype):
                 raise

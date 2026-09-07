@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
-from .rom import ROM_BASE, validate_rom
+from .rom import ROM_BASE, validate_supported_rom
 
 
 def disassemble_thumb(
@@ -18,7 +18,7 @@ def disassemble_thumb(
 ) -> str:
     if start < ROM_BASE or stop <= start:
         raise ValueError("use an increasing GBA ROM address range starting at 0x08000000")
-    validate_rom(rom)
+    validate_supported_rom(rom)
     executable = shutil.which(objdump)
     if executable is None:
         raise FileNotFoundError(
@@ -37,4 +37,3 @@ def disassemble_thumb(
         str(rom),
     ]
     return subprocess.check_output(command, text=True)
-

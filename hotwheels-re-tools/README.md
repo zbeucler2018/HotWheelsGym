@@ -84,14 +84,38 @@ gzip -dc path/to/dino_boneyard_multi_104.state > /tmp/dino104.state
 Slot 0 is the player and slot 1 is the first CPU in this state. The old-HLE
 recovery is narrowly guarded and is only for reverse-engineering old Stable-Retro
 states under current mGBA. The heading patch affects all stock CPUs, so a long
-running external controller must supply headings for every CPU or replace this
-probe with a selected-slot hook. ROM outputs remain ignored and must not be
-committed.
+running external controller must supply headings for every CPU. Use the
+selected-slot patch below for Gym training. ROM outputs remain ignored and must
+not be committed.
 
 `--cpu-target-speed SLOT:VALUE` writes the CPU's fixed-point target speed at
 `+0x2F0`. Unlike desired heading, stock AI does not overwrite that field during
 the tested race segment, so the speed experiment works with the original ROM as
 well as the heading-patched one.
+
+## Selected native-NPC control ROM
+
+`patch-npc-control` is the Gym-facing patch. It suppresses the stock desired-
+heading write only for selected CPU vehicle indices, so every other CPU keeps
+the original AI. It also exposes the stock AI's computed waypoint heading at
+CPU racer `+0x2EE` for structured observations.
+
+```bash
+PYTHONPATH=hotwheels-re-tools/src \
+  python3 -m hotwheels_re_tools patch-npc-control \
+  rom.gba /tmp/hotwheels-npc.gba \
+  --vehicle-index 1 --vehicle-index 2
+
+PYTHONPATH=hotwheels-re-tools/src \
+  python3 -m hotwheels_re_tools inspect-npc-control-rom \
+  /tmp/hotwheels-npc.gba
+```
+
+The hook branches through an eight-byte Thumb trampoline in an alignment gap
+at `0x080EC538`, then runs from the ROM's unused trailing zero padding at
+`0x0879BEE0`. Generated ROMs retain the original 8 MiB size and embed a small
+versioned marker used by the Gym wrappers. Keep every generated ROM ignored
+and uncommitted.
 
 ## Tests
 

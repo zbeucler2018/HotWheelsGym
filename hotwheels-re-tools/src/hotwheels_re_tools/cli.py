@@ -13,10 +13,14 @@ from .rom import (
     EXPECTED_ROM_SHA1,
     MIRROR_CPU_PATCHES,
     Patch,
+    controlled_vehicle_indices,
     create_external_cpu_heading_rom,
     create_mirror_cpu_rom,
+    create_npc_control_rom,
     decode_thumb_bl,
+    npc_control_patches,
     validate_rom,
+    validate_supported_rom,
 )
 from .savestate import inspect_state
 
@@ -66,6 +70,30 @@ def build_parser() -> argparse.ArgumentParser:
     heading_patch.add_argument(
         "--dry-run", action="store_true", help="verify and display patches without writing"
     )
+
+    npc_patch = commands.add_parser(
+        "patch-npc-control",
+        help="let external policies control selected native CPU racers",
+    )
+    npc_patch.add_argument("rom", type=Path)
+    npc_patch.add_argument("output", type=Path)
+    npc_patch.add_argument(
+        "--vehicle-index",
+        action="append",
+        type=int,
+        required=True,
+        help="CPU vehicle index to control (1..3); repeat for multiple models",
+    )
+    npc_patch.add_argument("--force", action="store_true")
+    npc_patch.add_argument(
+        "--dry-run", action="store_true", help="verify and display patches without writing"
+    )
+
+    inspect_patch = commands.add_parser(
+        "inspect-npc-control-rom",
+        help="show which native CPU vehicle indices a generated ROM exposes",
+    )
+    inspect_patch.add_argument("rom", type=Path)
     return parser
 
 
@@ -100,7 +128,9 @@ def _print_state(path: Path, as_json: bool) -> None:
         if racer.cpu_score_be is not None:
             details += (
                 f" score_be={racer.cpu_score_be} heading={racer.current_heading:#05x}"
-                f" desired={racer.desired_heading:#05x} speed_fixed={racer.speed_fixed}"
+                f" desired={racer.desired_heading:#05x}"
+                f" stock_shadow={racer.stock_heading_shadow:#05x}"
+                f" speed_fixed={racer.speed_fixed}"
                 f" target_speed={racer.target_speed}"
             )
         else:
@@ -127,9 +157,15 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "verify-rom":
-            digest = validate_rom(args.rom)
+            digest, selected = validate_supported_rom(args.rom)
             print(f"OK {args.rom}: sha1={digest} size=0x{args.rom.stat().st_size:x}")
-            print(f"expected sha1={EXPECTED_ROM_SHA1}")
+            if selected:
+                print(
+                    "selected-NPC control vehicles="
+                    + ",".join(str(index) for index in selected)
+                )
+            else:
+                print(f"original ROM sha1={EXPECTED_ROM_SHA1}")
         elif args.command == "inspect-state":
             _print_state(args.state, args.json)
         elif args.command == "disassemble":
@@ -159,6 +195,34 @@ def main(argv: list[str] | None = None) -> None:
                 )
                 print(f"wrote {args.output} (sha1={digest})")
                 print("keep this generated ROM ignored and uncommitted")
+        elif args.command == "patch-npc-control":
+            validate_rom(args.rom)
+            vehicle_indices = tuple(args.vehicle_index)
+            patches = npc_control_patches(vehicle_indices)
+            _print_patch_plan(patches)
+            if args.dry_run:
+                print("dry run: ROM validated; no output written")
+            else:
+                digest = create_npc_control_rom(
+                    args.rom,
+                    args.output,
+                    vehicle_indices,
+                    force=args.force,
+                )
+                selected = ", ".join(
+                    str(index)
+                    for index in controlled_vehicle_indices(args.output.read_bytes())
+                )
+                print(f"wrote {args.output} (sha1={digest}; vehicles={selected})")
+                print("keep this generated ROM ignored and uncommitted")
+        elif args.command == "inspect-npc-control-rom":
+            _, selected = validate_supported_rom(args.rom)
+            if not selected:
+                raise ValueError("ROM does not contain the selected-NPC control patch")
+            print(
+                f"NPC control patch: version=1 vehicles="
+                + ",".join(str(index) for index in selected)
+            )
     except (FileNotFoundError, OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         raise SystemExit(1) from error

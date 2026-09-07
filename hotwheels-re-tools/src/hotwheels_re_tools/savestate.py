@@ -44,6 +44,7 @@ class Racer:
     speed_fixed: int
     current_heading: int
     desired_heading: int | None
+    stock_heading_shadow: int | None
     target_speed: int | None
     cpu_score_be: int | None
     pressed: int | None
@@ -186,6 +187,9 @@ def inspect_state(path: Path) -> Inspection:
                 speed_fixed=read_u32(ewram, address + 0xE8),
                 current_heading=read_u16(ewram, address + 0xDE),
                 desired_heading=(read_u16(ewram, address + 0xE0) if not is_player else None),
+                stock_heading_shadow=(
+                    read_u16(ewram, address + 0x2EE) if not is_player else None
+                ),
                 target_speed=(read_u32(ewram, address + 0x2F0) if not is_player else None),
                 cpu_score_be=(read_be_u32(ewram, address + 0xEE) if not is_player else None),
                 pressed=(read_u16(ewram, address + 0x302) if is_player else None),

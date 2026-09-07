@@ -24,12 +24,14 @@ enum {
     MANAGER_CPU_COUNT = 0x449,
     MANAGER_TOTAL_COUNT = 0x44A,
     MANAGER_POINTER_LIST = 0x450,
+    RACER_VEHICLE_INDEX = 0xDC,
     RACER_CURRENT_HEADING = 0xDE,
     RACER_DESIRED_HEADING = 0xE0,
     RACER_X = 0xF8,
     RACER_Z = 0x100,
     RACER_PROGRESS = 0x148,
     RACER_SPEED = 0xE8,
+    RACER_STOCK_HEADING_SHADOW = 0x2EE,
     RACER_TARGET_SPEED = 0x2F0,
 };
 
@@ -170,12 +172,15 @@ static void print_racers(struct mCore* core, uint32_t manager, const char* label
     }
     for (unsigned slot = 0; slot < total; ++slot) {
         uint32_t racer = racer_address(core, manager, slot);
-        printf("  slot=%u address=%08" PRIx32 " progress=%u heading=%03x"
-               " desired=%03x speed=%" PRId32 " target_speed=%" PRId32
+        printf("  slot=%u vehicle=%u address=%08" PRIx32
+               " progress=%u heading=%03x desired=%03x stock_heading=%03x"
+               " speed=%" PRId32 " target_speed=%" PRId32
                " x=%" PRId32 " z=%" PRId32 "\n",
-               slot, racer, core->busRead16(core, racer + RACER_PROGRESS),
+               slot, core->busRead8(core, racer + RACER_VEHICLE_INDEX), racer,
+               core->busRead16(core, racer + RACER_PROGRESS),
                core->busRead16(core, racer + RACER_CURRENT_HEADING),
                core->busRead16(core, racer + RACER_DESIRED_HEADING),
+               core->busRead16(core, racer + RACER_STOCK_HEADING_SHADOW),
                (int32_t) core->busRead32(core, racer + RACER_SPEED),
                (int32_t) core->busRead32(core, racer + RACER_TARGET_SPEED),
                (int32_t) core->busRead32(core, racer + RACER_X),
