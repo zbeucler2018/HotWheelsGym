@@ -1,7 +1,8 @@
 # Reverse-engineering findings
 
-Status: static and savestate analysis reproduced on 2026-09-07. The deterministic
-control patch has not yet been run in an emulator.
+Status: static, savestate, and headless mGBA analysis reproduced on 2026-09-07.
+The desired-heading command boundary has been dynamically validated. The larger
+CPU-to-player-class mirror patch has not yet been run from a cold race start.
 
 ## ROM identity
 
@@ -80,6 +81,42 @@ The alternate branch obtains a mask from a 14-byte indexed record and derives
 the same transitions. This is a player/link-racer control path; stock CPU
 objects are smaller and use a different vtable.
 
+## Stock CPU command boundary
+
+The CPU slot-four update at `0x080F6C2C` has a compact steering boundary:
+
+| Offset | Width | Meaning |
+|---:|---:|---|
+| `+0xDE` | 16 bits | current heading (12-bit circle) |
+| `+0xE0` | 16 bits | desired heading (12-bit circle) |
+| `+0xE8` | 32 bits | current fixed-point speed |
+| `+0x2F0` | 32 bits | target fixed-point speed |
+
+At `0x080F7112`, the stock AI calculates a heading to its current waypoint. The
+store at `0x080F7116` writes that result to racer `+0xE0`. Later in the same
+update, `0x08108E94` calculates the bounded turn from `+0xDE` toward `+0xE0`;
+the updated current heading drives the velocity-vector calculation.
+
+The `patch-external-cpu-heading` probe NOPs only the store at `0x080F7116`, so
+an emulator-side controller can own `+0xE0`. From generated Dino Boneyard state
+104, a 120-frame headless mGBA comparison produced:
+
+| Run | CPU 1 progress | heading | x | z |
+|---|---:|---:|---:|---:|
+| stock AI | 107 -> 113 | `0x641` -> `0x6EF` | 5,456,220 -> 6,251,826 | 6,970,483 -> 5,928,424 |
+| forced `+0xE0 = 0x680` | 107 -> 110 | `0x641` -> `0x673` | 5,456,220 -> 6,015,519 | 6,970,483 -> 6,199,021 |
+
+This proves that `+0xE0` is an effective steering-command input rather than
+merely telemetry. The one-instruction probe suppresses the desired-heading
+write for every CPU, so it is not yet the final selected-slot hook.
+
+`+0x2F0` is also a live speed command and does not need the heading-store patch.
+In the same 120-frame test, CPU 1's stock target of 59,904 yielded current speed
+59,889 and progress 113. Holding the target at 30,000 yielded current speed
+33,689 and progress 110; holding it at zero yielded current speed 3,630 and
+progress 109. The native update smoothly approaches the supplied target while
+retaining the rest of the CPU racer's physics.
+
 ## Savestate layout and NPC score identity
 
 The gzip payload is `0x61000` bytes. EWRAM is the `0x40000`-byte region at
@@ -95,6 +132,15 @@ Historical `npc_score` address `0x02007C16` resolves exactly to racer-pointer
 entry 3 (the third CPU object at `0x02007B28`) plus `0xEE`. Equivalent `+0xEE`
 fields exist on all CPU racers and vary independently. It is therefore a
 specific NPC slot's field, not a race-manager aggregation.
+
+The historical state header is mGBA format `0x01000002` with HLE BIOS checksum
+`0x590E6155`. Current mGBA 0.10.2 expects format `0x01000007` and HLE checksum
+`0x5A262303`. These states were captured inside the old HLE BIOS IRQ trampoline
+(`PC=0x0000001C`, IRQ-mode CPSR). Letting the new HLE BIOS resume that old
+trampoline corrupts execution. For reverse-engineering experiments, the native
+probe's `--resume-old-hle` option skips the one pending IRQ return by restoring
+`CPSR=SPSR` and `PC=LR-4`; the race then advances and renders correctly. This is
+a compatibility workaround, not a general savestate converter.
 
 ## Experimental deterministic patch
 
@@ -115,11 +161,13 @@ assumes CPU-specific fields or vtable behavior may expose an incompatibility.
 
 ## Open issues
 
-- The experimental patch has not yet been validated in mGBA or Stable-Retro.
+- The CPU-to-player-class mirror patch has not yet been validated from a cold
+  race start in mGBA or Stable-Retro.
 - A final hook should control one selected CPU slot rather than replacing all
-  CPU objects with player-racer objects.
-- The stock CPU vtable update (`0x080F6C2C`) computes steering/physics internally;
-  its clean command boundary is still unidentified.
+  CPU objects or suppressing the heading write for every CPU.
+- The final command API still needs policy-friendly normalization for the
+  12-bit heading and fixed-point target speed.
+- The old-HLE IRQ recovery intentionally skips one interrupt handler invocation;
+  use the original Stable-Retro 0.9.2-era core for production-faithful playback.
 - A pixel policy still sees the human camera, so model-correct observation is a
   separate milestone after deterministic control.
-

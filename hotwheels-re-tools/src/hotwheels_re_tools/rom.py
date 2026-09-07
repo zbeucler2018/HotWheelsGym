@@ -112,6 +112,16 @@ MIRROR_CPU_PATCHES = (
 )
 
 
+EXTERNAL_CPU_HEADING_PATCHES = (
+    Patch(
+        "stock CPU desired-heading write",
+        0x080F7116,
+        bytes.fromhex("2880"),  # strh r0, [r5] where r5 == racer + 0xe0
+        bytes.fromhex("c046"),  # nop; an external controller owns racer + 0xe0
+    ),
+)
+
+
 def apply_checked_patches(data: bytes, patches: tuple[Patch, ...]) -> bytes:
     output = bytearray(data)
     for patch in patches:
@@ -141,3 +151,17 @@ def create_mirror_cpu_rom(source: Path, output: Path, *, force: bool = False) ->
     output.write_bytes(patched)
     return sha1_bytes(patched)
 
+
+def create_external_cpu_heading_rom(
+    source: Path, output: Path, *, force: bool = False
+) -> str:
+    """Create a ROM where an external controller owns CPU racer ``+0xE0``."""
+
+    if source.resolve() == output.resolve():
+        raise ValueError("refusing to overwrite the source ROM")
+    if output.exists() and not force:
+        raise FileExistsError(f"output already exists: {output} (pass --force to replace it)")
+    validate_rom(source)
+    patched = apply_checked_patches(source.read_bytes(), EXTERNAL_CPU_HEADING_PATCHES)
+    output.write_bytes(patched)
+    return sha1_bytes(patched)

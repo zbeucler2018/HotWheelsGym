@@ -53,10 +53,49 @@ This is an architecture probe, not the final PPO integration. It still needs
 to be validated in an emulator. See [FINDINGS.md](FINDINGS.md) for the evidence,
 limitations, and exact patch sites.
 
+## External CPU-heading probe
+
+The narrower `patch-external-cpu-heading` command disables the stock AI's write
+to CPU racer `+0xE0` (desired heading). A debugger, emulator harness, or eventual
+policy bridge can then write a 12-bit heading directly while the native turning,
+physics, collisions, and race management continue to run.
+
+```bash
+PYTHONPATH=hotwheels-re-tools/src \
+  python3 -m hotwheels_re_tools patch-external-cpu-heading \
+  rom.gba rom.external_heading.gba
+```
+
+The source-only headless harness in `native/mgba_probe.c` reproduces the dynamic
+test with libmGBA development headers installed:
+
+```bash
+cc -O2 -o /tmp/hwre-mgba-probe \
+  hotwheels-re-tools/native/mgba_probe.c -lmgba
+
+# Historical states are gzip files; the harness intentionally accepts raw state.
+gzip -dc path/to/dino_boneyard_multi_104.state > /tmp/dino104.state
+
+/tmp/hwre-mgba-probe \
+  rom.external_heading.gba /tmp/dino104.state 120 /tmp/result.ppm \
+  --resume-old-hle --cpu-heading 1:0x680 --cpu-target-speed 1:30000
+```
+
+Slot 0 is the player and slot 1 is the first CPU in this state. The old-HLE
+recovery is narrowly guarded and is only for reverse-engineering old Stable-Retro
+states under current mGBA. The heading patch affects all stock CPUs, so a long
+running external controller must supply headings for every CPU or replace this
+probe with a selected-slot hook. ROM outputs remain ignored and must not be
+committed.
+
+`--cpu-target-speed SLOT:VALUE` writes the CPU's fixed-point target speed at
+`+0x2F0`. Unlike desired heading, stock AI does not overwrite that field during
+the tested race segment, so the speed experiment works with the original ROM as
+well as the heading-patched one.
+
 ## Tests
 
 ```bash
 PYTHONPATH=hotwheels-re-tools/src \
   python3 -m unittest discover -s hotwheels-re-tools/tests -v
 ```
-

@@ -1,6 +1,7 @@
 import unittest
 
 from hotwheels_re_tools.rom import (
+    EXTERNAL_CPU_HEADING_PATCHES,
     MIRROR_CPU_PATCHES,
     PLAYER_RACER_CONSTRUCTOR,
     apply_checked_patches,
@@ -38,7 +39,16 @@ class ThumbBranchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "mismatch"):
             apply_checked_patches(bytes(size), MIRROR_CPU_PATCHES)
 
+    def test_external_heading_patch_nops_checked_store(self) -> None:
+        patch = EXTERNAL_CPU_HEADING_PATCHES[0]
+        data = bytearray(patch.offset + len(patch.expected))
+        data[patch.offset : patch.offset + len(patch.expected)] = patch.expected
+        output = apply_checked_patches(bytes(data), EXTERNAL_CPU_HEADING_PATCHES)
+        self.assertEqual(
+            output[patch.offset : patch.offset + len(patch.replacement)],
+            bytes.fromhex("c046"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
-

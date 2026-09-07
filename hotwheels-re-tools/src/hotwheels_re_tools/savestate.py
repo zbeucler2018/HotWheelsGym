@@ -41,6 +41,10 @@ class Racer:
     vehicle_index: int
     progress: int
     speed: int
+    speed_fixed: int
+    current_heading: int
+    desired_heading: int | None
+    target_speed: int | None
     cpu_score_be: int | None
     pressed: int | None
     released: int | None
@@ -52,6 +56,12 @@ class Inspection:
     state_path: str
     payload_size: int
     ewram_payload_offset: int
+    version_magic: int
+    bios_checksum: int
+    rom_crc32: int
+    pc: int
+    cpsr: int
+    spsr: int
     pointer_list: int | None
     manager: int | None
     player_count: int | None
@@ -173,6 +183,10 @@ def inspect_state(path: Path) -> Inspection:
                 vehicle_index=read_u8(ewram, address + 0xDC),
                 progress=read_u16(ewram, address + 0x148),
                 speed=read_u16(ewram, address + 0xE9),
+                speed_fixed=read_u32(ewram, address + 0xE8),
+                current_heading=read_u16(ewram, address + 0xDE),
+                desired_heading=(read_u16(ewram, address + 0xE0) if not is_player else None),
+                target_speed=(read_u32(ewram, address + 0x2F0) if not is_player else None),
                 cpu_score_be=(read_be_u32(ewram, address + 0xEE) if not is_player else None),
                 pressed=(read_u16(ewram, address + 0x302) if is_player else None),
                 released=(read_u16(ewram, address + 0x304) if is_player else None),
@@ -194,6 +208,12 @@ def inspect_state(path: Path) -> Inspection:
         state_path=str(path),
         payload_size=len(payload),
         ewram_payload_offset=EWRAM_OFFSET,
+        version_magic=struct.unpack_from("<I", payload, 0x00)[0],
+        bios_checksum=struct.unpack_from("<I", payload, 0x04)[0],
+        rom_crc32=struct.unpack_from("<I", payload, 0x08)[0],
+        pc=struct.unpack_from("<I", payload, 0x5C)[0],
+        cpsr=struct.unpack_from("<I", payload, 0x60)[0],
+        spsr=struct.unpack_from("<I", payload, 0x64)[0],
         pointer_list=pointer_list,
         manager=manager,
         player_count=(read_u8(ewram, manager + 0x448) if manager else None),
@@ -202,4 +222,3 @@ def inspect_state(path: Path) -> Inspection:
         racers=tuple(racers),
         historical_npc_score_owner=owner,
     )
-
