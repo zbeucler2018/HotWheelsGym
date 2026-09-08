@@ -50,12 +50,18 @@ Each timestamped run contains:
 - `evaluation/evaluations.csv`;
 - `evaluation/best_model.zip`, selected by finish rate and then race time;
 - periodic checkpoints and `final_model.zip`;
+- `best_model.mp4` plus a JSON sidecar after successful training;
 - resolved configuration, Git revision, ROM hashes, action/observation schema,
   and frozen-opponent hashes.
 
 Evaluation runs at startup, every 250,000 timesteps, and at shutdown. It uses a
 separate deterministic start-line race and records completion, finish rate,
 raw finish frames, mean speed, and rank.
+
+After the environments close, the trainer automatically records one
+deterministic start-line race using `evaluation/best_model.zip`. The MP4 plays
+at real-time speed (15 encoded frames per second for four-frame action repeat).
+Pass `--no-record-video` only when this final recording is not wanted.
 
 ## Observation and action contract
 

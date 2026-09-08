@@ -23,6 +23,7 @@ training_states:
 eval_every_timesteps: 250000
 eval_episodes: 2
 checkpoint_every_timesteps: 250000
+record_video: true
 
 ppo:
   learning_rate: 0.0003

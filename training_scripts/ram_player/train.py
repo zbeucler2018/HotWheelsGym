@@ -49,6 +49,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-root", type=Path, default=DEFAULT_RUN_ROOT)
     parser.add_argument("--resume-model", type=Path)
     parser.add_argument(
+        "--no-record-video",
+        action="store_true",
+        help="skip recording the best checkpoint after successful training",
+    )
+    parser.add_argument(
         "--opponent",
         action="append",
         type=_opponent,
@@ -136,6 +141,7 @@ def main() -> None:
     print(f"TensorBoard: tensorboard --logdir {run_dir / 'tensorboard'}")
 
     ppo, policy_kwargs = _ppo_arguments(config)
+    completed = False
     training_env = SubprocVecEnv(env_functions)
     try:
         eval_env = make_ram_env(
@@ -205,10 +211,24 @@ def main() -> None:
                 f"Best model saved to "
                 f"{run_dir / 'evaluation' / 'best_model.zip'}"
             )
+            completed = True
         finally:
             eval_env.close()
     finally:
         training_env.close()
+
+    if completed and bool(config.get("record_video", True)) and not args.no_record_video:
+        from .record import record_model
+
+        video_path = run_dir / "best_model.mp4"
+        record_model(
+            run_dir / "evaluation" / "best_model.zip",
+            video_path,
+            config,
+            opponent_paths=opponent_paths,
+            device=args.device,
+        )
+        print(f"Best-model video saved to {video_path}")
 
 
 if __name__ == "__main__":
