@@ -1,0 +1,257 @@
+"""Shared setup for isolated Player 1 RAM training and self-play."""
+
+from __future__ import annotations
+
+from hashlib import sha1
+import json
+import os
+from pathlib import Path
+import platform
+import subprocess
+import sys
+from typing import Any, Mapping
+
+import gymnasium as gym
+from stable_baselines3 import PPO
+from stable_baselines3.common.monitor import Monitor
+import yaml
+
+import HotWheelsGym
+from HotWheelsGym import DinoRAMModelOpponentEnv, DinoRAMPlayerEnv, RAMActionRepeat
+from HotWheelsGym.npc_control import controlled_vehicle_indices_from_rom
+from HotWheelsGym.ram_opponent_control import RAM_ACTIONS, RAM_OBSERVATION_NAMES
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONFIG = Path(__file__).with_name("dino_boneyard.yml")
+DEFAULT_RUN_ROOT = REPO_ROOT / "training_scripts" / "ram_runs"
+ENV_ID = "HWSTC-dino_boneyard-multi-3"
+
+MONITOR_INFO_KEYS = (
+    "ram_player_completion",
+    "ram_player_finished",
+    "ram_player_finish_frame",
+    "ram_player_lap",
+    "ram_player_rank",
+    "ram_player_speed",
+)
+
+
+def load_config(path: Path) -> dict[str, Any]:
+    with path.open() as handle:
+        config = yaml.safe_load(handle)
+    if not isinstance(config, dict):
+        raise ValueError(f"configuration must be a mapping: {path}")
+    required = {
+        "run_name",
+        "total_timesteps",
+        "num_envs",
+        "environment",
+        "frame_skip",
+        "max_episode_steps",
+        "opponents",
+        "opponent_max_turn",
+        "opponent_max_target_speed",
+        "eval_every_timesteps",
+        "eval_episodes",
+        "checkpoint_every_timesteps",
+        "seed",
+        "ppo",
+    }
+    missing = required - set(config)
+    if missing:
+        raise ValueError("missing configuration fields: " + ", ".join(sorted(missing)))
+    if int(config["num_envs"]) < 1:
+        raise ValueError("num_envs must be at least one")
+    if config["environment"] != ENV_ID:
+        raise ValueError(f"the prototype environment must be {ENV_ID}")
+    if int(config["total_timesteps"]) < 1:
+        raise ValueError("total_timesteps must be at least one")
+    if int(config["frame_skip"]) < 1:
+        raise ValueError("frame_skip must be at least one")
+    if int(config["max_episode_steps"]) < 1:
+        raise ValueError("max_episode_steps must be at least one")
+    if int(config["eval_episodes"]) < 1:
+        raise ValueError("eval_episodes must be at least one")
+    if int(config["eval_every_timesteps"]) < 1:
+        raise ValueError("eval_every_timesteps must be at least one")
+    if int(config["checkpoint_every_timesteps"]) < 1:
+        raise ValueError("checkpoint_every_timesteps must be at least one")
+    if not 0 <= int(config["opponent_max_turn"]) <= 0x800:
+        raise ValueError("opponent_max_turn must be between 0 and 0x800")
+    if not 0 < int(config["opponent_max_target_speed"]) <= 0xFFFFFFFF:
+        raise ValueError("opponent_max_target_speed must fit in unsigned 32 bits")
+    if not isinstance(config["ppo"], dict):
+        raise ValueError("ppo configuration must be a mapping")
+    if not isinstance(config["opponents"], dict):
+        raise ValueError("opponents must map CPU slots to RAM model paths")
+    return config
+
+
+def resolve_repo_path(value: str | Path) -> Path:
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else REPO_ROOT / path
+
+
+def file_sha1(path: Path) -> str:
+    digest = sha1()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def normalize_opponents(raw: Mapping[Any, Any]) -> dict[int, Path]:
+    opponents: dict[int, Path] = {}
+    for raw_slot, raw_path in raw.items():
+        slot = int(raw_slot)
+        if slot not in (1, 2, 3):
+            raise ValueError("opponent CPU slots must be 1, 2, or 3")
+        path = resolve_repo_path(str(raw_path)).resolve()
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        opponents[slot] = path
+    return opponents
+
+
+def prepare_rom(
+    source_rom: Path, opponent_slots: tuple[int, ...], private_dir: Path
+) -> Path:
+    """Import the original ROM or privately patch requested opponent slots."""
+
+    source_rom = source_rom.expanduser().resolve()
+    if not source_rom.is_file():
+        raise FileNotFoundError(source_rom)
+    controlled = controlled_vehicle_indices_from_rom(source_rom)
+    requested = tuple(sorted(set(opponent_slots)))
+    if controlled and controlled != requested:
+        raise ValueError(
+            f"{source_rom} controls vehicle indices {controlled}, but this run needs "
+            f"exactly {requested}; use the original ROM and let the runner patch it"
+        )
+    if requested and not controlled:
+        private_dir.mkdir(parents=True, exist_ok=True)
+        active_rom = private_dir / "dino-self-play.gba"
+        tool_source = REPO_ROOT / "hotwheels-re-tools" / "src"
+        process_environment = os.environ.copy()
+        current_pythonpath = process_environment.get("PYTHONPATH")
+        process_environment["PYTHONPATH"] = str(tool_source) + (
+            os.pathsep + current_pythonpath if current_pythonpath else ""
+        )
+        command = [
+            sys.executable,
+            "-m",
+            "hotwheels_re_tools",
+            "patch-npc-control",
+            str(source_rom),
+            str(active_rom),
+        ]
+        for slot in requested:
+            command.extend(("--vehicle-index", str(slot)))
+        command.append("--force")
+        subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            env=process_environment,
+            check=True,
+        )
+    else:
+        active_rom = source_rom
+    HotWheelsGym.import_rom(active_rom, force=True)
+    return active_rom
+
+
+def training_state_paths(config: dict[str, Any]) -> list[Path | None]:
+    raw_states = config.get("training_states") or [None]
+    states: list[Path | None] = []
+    for raw_state in raw_states:
+        if raw_state is None:
+            states.append(None)
+            continue
+        state = resolve_repo_path(raw_state)
+        if not state.is_file():
+            raise FileNotFoundError(state)
+        states.append(state)
+    return states
+
+
+def make_ram_env(
+    *,
+    frame_skip: int,
+    max_episode_steps: int,
+    seed: int,
+    opponent_paths: Mapping[int, str] | None = None,
+    opponent_max_turn: int = 0x200,
+    opponent_max_target_speed: int = 0x12000,
+    state_path: str | None = None,
+    monitor_path: str | None = None,
+) -> gym.Env:
+    base = HotWheelsGym.make(ENV_ID, render_mode="rgb_array")
+    if state_path:
+        base.load_state(state_path)
+    env: gym.Env = base
+    if opponent_paths:
+        models = {
+            int(slot): PPO.load(path, device="cpu")
+            for slot, path in opponent_paths.items()
+        }
+        env = DinoRAMModelOpponentEnv(
+            env,
+            models,
+            action_repeat=frame_skip,
+            max_turn=opponent_max_turn,
+            max_target_speed=opponent_max_target_speed,
+        )
+    env = DinoRAMPlayerEnv(env)
+    env = RAMActionRepeat(env, repeat=frame_skip)
+    env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_steps)
+    if monitor_path:
+        Path(monitor_path).parent.mkdir(parents=True, exist_ok=True)
+        env = Monitor(env, filename=monitor_path, info_keywords=MONITOR_INFO_KEYS)
+    env.reset(seed=seed)
+    return env
+
+
+def write_run_metadata(
+    run_dir: Path,
+    config: dict[str, Any],
+    config_path: Path,
+    source_rom: Path,
+    active_rom: Path,
+    opponents: Mapping[int, Path],
+) -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    with (run_dir / "resolved_config.yml").open("w") as handle:
+        yaml.safe_dump(config, handle, sort_keys=False)
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        commit = "unknown"
+    metadata = {
+        "environment": ENV_ID,
+        "config_path": str(config_path.resolve()),
+        "git_commit": commit,
+        "python": sys.version,
+        "platform": platform.platform(),
+        "source_rom_sha1": file_sha1(source_rom),
+        "active_rom_sha1": file_sha1(active_rom),
+        "active_rom_path": str(active_rom.resolve()),
+        "observation_names": RAM_OBSERVATION_NAMES,
+        "actions": [
+            {"index": index, "name": action.name, "buttons": action.buttons}
+            for index, action in enumerate(RAM_ACTIONS)
+        ],
+        "opponents": {
+            str(slot): {"path": str(path), "sha1": file_sha1(path)}
+            for slot, path in opponents.items()
+        },
+    }
+    with (run_dir / "metadata.json").open("w") as handle:
+        json.dump(metadata, handle, indent=2)
+        handle.write("\n")

@@ -7,6 +7,7 @@ training_scripts/data/logs/*
 training_scripts/data/models/*
 training_scripts/data/best_models/*
 training_scripts/data/evaluation/*
+training_scripts/ram_runs/
 
 
 

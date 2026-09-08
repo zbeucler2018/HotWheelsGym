@@ -5,6 +5,11 @@ import shutil
 from .enums import RaceMode, Tracks
 from .HotWheels import HotWheelsEnv
 from .NPC import HotWheelsNPCEnv, ModelOpponentEnv
+from .RAMOpponent import (
+    DinoRAMModelOpponentEnv,
+    DinoRAMPlayerEnv,
+    RAMActionRepeat,
+)
 
 GAME_NAME = "HotWheelsStuntTrackChallenge-GbAdvance"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -16,6 +21,9 @@ __all__ = [
     "HotWheelsEnv",
     "HotWheelsNPCEnv",
     "ModelOpponentEnv",
+    "DinoRAMPlayerEnv",
+    "DinoRAMModelOpponentEnv",
+    "RAMActionRepeat",
     "GAME_NAME",
 ]
 

@@ -1,0 +1,39 @@
+run_name: dino_ram_player_v1
+
+# Three emulator workers leave one N150 core available for PPO updates.
+total_timesteps: 5000000
+num_envs: 3
+seed: 2026
+
+environment: HWSTC-dino_boneyard-multi-3
+frame_skip: 4
+max_episode_steps: 4500
+
+# Empty for the first overnight run. Later, map CPU slots to frozen Player 1
+# RAM checkpoints, e.g. {1: zoo/dino_ram/best_model.zip}.
+opponents: {}
+opponent_max_turn: 512
+opponent_max_target_speed: 73728
+
+training_states:
+  - training_scripts/data/states/dino_boneyard_multi_71.state
+  - training_scripts/data/states/dino_boneyard_multi_180.state
+  - training_scripts/data/states/dino_boneyard_multi_290.state
+
+eval_every_timesteps: 250000
+eval_episodes: 2
+checkpoint_every_timesteps: 250000
+
+ppo:
+  learning_rate: 0.0003
+  n_steps: 1024
+  batch_size: 256
+  n_epochs: 10
+  gamma: 0.995
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.005
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  policy_layers: [128, 128]
+  value_layers: [128, 128]

@@ -52,6 +52,12 @@ This requires a locally generated, selected-slot ROM patch; no ROM or generated
 ROM is committed. See [NPC_ENVIRONMENT.md](NPC_ENVIRONMENT.md) for the patch,
 training, and human-vs-model commands.
 
+For the faster self-play path, the repository also has a separate Player 1
+RAM trainer. Its checkpoints can be placed into patched CPU slots as frozen
+opponents while a newer Player 1 model trains against them. See
+[RAM_PLAYER.md](RAM_PLAYER.md). This code path does not import or modify the
+pixel trainer.
+
 # Environment
 
 Use the template
