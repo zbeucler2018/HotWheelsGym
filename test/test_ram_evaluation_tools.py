@@ -4,8 +4,6 @@ from tempfile import TemporaryDirectory
 
 import gymnasium as gym
 import numpy as np
-from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
-from torch.utils.tensorboard import SummaryWriter
 
 from HotWheelsGym.RAMOpponent import _is_white_respawn_frame
 from training_scripts.ram_player.callbacks import evaluate_ram_policy
@@ -13,7 +11,7 @@ from training_scripts.ram_player.common import (
     require_all_opponent_slots,
     validate_model_observation_space,
 )
-from training_scripts.ram_player.media import RGBVideoWriter, log_video_replay
+from training_scripts.ram_player.media import RGBVideoWriter
 from training_scripts.ram_player.sweep import checkpoint_sort_key
 
 
@@ -99,7 +97,7 @@ class RAMEvaluationToolTests(unittest.TestCase):
             fast_finish,
         )
 
-    def test_tensorboard_replay_is_an_animated_image_summary(self):
+    def test_rgb_video_writer_keeps_evaluation_video_on_disk(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             video = root / "race.mp4"
@@ -111,22 +109,8 @@ class RAMEvaluationToolTests(unittest.TestCase):
                 recorder.write(next_frame)
             recorder.close()
 
-            log_dir = root / "events"
-            writer = SummaryWriter(log_dir=str(log_dir))
-            gif = log_video_replay(
-                writer,
-                "evaluation_replays/test",
-                video,
-                sample_fps=1,
-                playback_fps=2,
-                width=16,
-            )
-            writer.close()
-
-            self.assertTrue(gif.is_file())
-            accumulator = EventAccumulator(str(log_dir))
-            accumulator.Reload()
-            self.assertIn("evaluation_replays/test", accumulator.Tags()["images"])
+            self.assertTrue(video.is_file())
+            self.assertGreater(video.stat().st_size, 0)
 
 
 if __name__ == "__main__":

@@ -73,8 +73,7 @@ Pass `--no-record-video` only when this final recording is not wanted.
 
 The checkpoint sweep evaluates every periodic checkpoint plus `final_model.zip`
 with a finish-capable horizon. It copies the fastest finisher, records a fresh
-start-line MP4, and logs every checkpoint metric plus an accelerated replay to
-TensorBoard:
+start-line MP4, and logs every checkpoint metric to TensorBoard:
 
 ```bash
 python3 -m training_scripts.ram_player.sweep \
@@ -82,9 +81,9 @@ python3 -m training_scripts.ram_player.sweep \
   --run-dir training_scripts/ram_runs/RUN
 ```
 
-Use TensorBoard's **Scalars** tab for checkpoint curves, **Text** for the result
-table, and **Images** for the animated race replay. The full-quality MP4 and a
-CSV/JSON report remain in the sweep directory.
+Use TensorBoard's **Scalars** tab for checkpoint curves and **Text** for the
+result table. The full-quality MP4 and a CSV/JSON report remain in the sweep
+directory; videos are intentionally not encoded as TensorBoard images.
 
 ## Observation and action contract
 
@@ -227,12 +226,12 @@ model, and writes episode CSV, summary JSON, and TensorBoard scalars under
 `training_scripts/ram_runs/comparison_*`. Rewards are retained for debugging,
 but the meaningful comparison is finish rate, raw frames/time, completion, and
 rank because the pixel and RAM reward functions differ. It also records one
-MP4 per model and embeds accelerated replays in TensorBoard's **Images** tab.
+MP4 per model on disk without embedding video frames in TensorBoard.
 
 ## Validate a checkpoint as an NPC
 
 This records the selected RAM model driving Player 1 and all three opponent
-slots, with per-racer telemetry and a TensorBoard replay:
+slots, with per-racer TensorBoard telemetry and an MP4 on disk:
 
 ```bash
 uv run --no-project python -m training_scripts.ram_player.self_play_eval \

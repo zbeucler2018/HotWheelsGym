@@ -17,7 +17,6 @@ from .common import (
     load_config,
     prepare_rom,
 )
-from .media import log_video_replay
 from .record import record_model
 
 
@@ -140,9 +139,6 @@ def main() -> None:
             for name, value in opponent_metrics.items():
                 writer.add_scalar(f"self_play/npc_{slot}/{name}", value, 0)
         writer.add_text("self_play/results", _summary_markdown(result), 0)
-        replay = log_video_replay(
-            writer, "evaluation_replays/ram_self_play", video_path
-        )
     finally:
         writer.close()
 
@@ -151,14 +147,13 @@ def main() -> None:
         "opponent_model": str(opponent_model),
         "opponent_slots": [1, 2, 3],
         "max_episode_steps": max_episode_steps,
-        "tensorboard_replay": str(replay),
         "result": result,
     }
     with (output_dir / "summary.json").open("w") as handle:
         json.dump(summary, handle, indent=2)
         handle.write("\n")
     print(json.dumps(summary, indent=2))
-    print(f"Self-play results and TensorBoard replay written to {output_dir}")
+    print(f"Self-play results, TensorBoard metrics, and MP4 written to {output_dir}")
 
 
 if __name__ == "__main__":

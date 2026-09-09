@@ -22,7 +22,6 @@ from .common import (
     prepare_rom,
     validate_model_observation_space,
 )
-from .media import log_video_replay
 from .record import record_model
 
 CHECKPOINT_PATTERN = re.compile(r"dino_ram_player_(\d+)_steps\.zip$")
@@ -187,16 +186,9 @@ def main() -> None:
     shutil.copy2(best["model_path"], fastest_model)
 
     replay: dict[str, Any] | None = None
-    replay_gif: Path | None = None
     if not args.no_record_video:
         video_path = output_dir / "fastest_model.mp4"
         replay = record_model(fastest_model, video_path, config, device=args.device)
-        replay_gif = log_video_replay(
-            writer,
-            "evaluation_replays/fastest_ram_checkpoint",
-            video_path,
-            global_step=int(best["timesteps"]),
-        )
 
     writer.add_text("checkpoint_sweep/results", _summary_markdown(rows, best), 0)
     writer.flush()
@@ -209,13 +201,12 @@ def main() -> None:
         "selected": best,
         "fastest_model": str(fastest_model),
         "replay": replay,
-        "tensorboard_replay": str(replay_gif) if replay_gif else None,
     }
     with (output_dir / "summary.json").open("w") as handle:
         json.dump(payload, handle, indent=2)
         handle.write("\n")
     print(f"Selected {best['label']} -> {fastest_model}")
-    print(f"Sweep results and TensorBoard replay written to {output_dir}")
+    print(f"Sweep results, TensorBoard metrics, and MP4 written to {output_dir}")
 
 
 if __name__ == "__main__":

@@ -33,7 +33,7 @@ from .common import (
     resolve_repo_path,
     validate_model_observation_space,
 )
-from .media import RGBVideoWriter, log_video_replay
+from .media import RGBVideoWriter
 from .record import record_model
 
 DEFAULT_PIXEL_MODEL = resolve_repo_path("zoo/dbm_basic/best_model.zip")
@@ -366,9 +366,6 @@ def main() -> None:
             videos["ram"] = record_model(
                 ram_model, ram_video, ram_config, device=args.device
             )
-            videos["ram"]["tensorboard_replay"] = str(
-                log_video_replay(writer, "evaluation_replays/ram", ram_video)
-            )
             pixel_video = output_dir / "pixel.mp4"
             videos["pixel"] = _record_pixel(
                 pixel_model,
@@ -376,9 +373,6 @@ def main() -> None:
                 args.device,
                 max_episode_steps,
                 pixel_video,
-            )
-            videos["pixel"]["tensorboard_replay"] = str(
-                log_video_replay(writer, "evaluation_replays/pixel", pixel_video)
             )
     finally:
         writer.close()
