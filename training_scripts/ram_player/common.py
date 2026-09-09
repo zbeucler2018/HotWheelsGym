@@ -2,25 +2,24 @@
 
 from __future__ import annotations
 
-from hashlib import sha1
 import json
 import os
-from pathlib import Path
 import platform
 import subprocess
 import sys
+from hashlib import sha1
+from pathlib import Path
 from typing import Any, Mapping
 
 import gymnasium as gym
+import yaml
 from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
-import yaml
 
 import HotWheelsGym
 from HotWheelsGym import DinoRAMModelOpponentEnv, DinoRAMPlayerEnv, RAMActionRepeat
 from HotWheelsGym.npc_control import controlled_vehicle_indices_from_rom
 from HotWheelsGym.ram_opponent_control import RAM_ACTIONS, RAM_OBSERVATION_NAMES
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = Path(__file__).with_name("dino_boneyard.yml")
@@ -71,6 +70,8 @@ def load_config(path: Path) -> dict[str, Any]:
         raise ValueError("frame_skip must be at least one")
     if int(config["max_episode_steps"]) < 1:
         raise ValueError("max_episode_steps must be at least one")
+    if int(config.get("evaluation_max_episode_steps", config["max_episode_steps"])) < 1:
+        raise ValueError("evaluation_max_episode_steps must be at least one")
     if int(config["eval_episodes"]) < 1:
         raise ValueError("eval_episodes must be at least one")
     if int(config["eval_every_timesteps"]) < 1:
@@ -86,6 +87,12 @@ def load_config(path: Path) -> dict[str, Any]:
     if not isinstance(config["opponents"], dict):
         raise ValueError("opponents must map CPU slots to RAM model paths")
     return config
+
+
+def evaluation_episode_steps(config: Mapping[str, Any]) -> int:
+    """Return the evaluation horizon, with legacy-config compatibility."""
+
+    return int(config.get("evaluation_max_episode_steps", config["max_episode_steps"]))
 
 
 def resolve_repo_path(value: str | Path) -> Path:

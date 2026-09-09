@@ -8,6 +8,8 @@ seed: 2026
 environment: HWSTC-dino_boneyard-multi-3
 frame_skip: 4
 max_episode_steps: 4500
+# Keep training rollouts bounded, but allow a full start-line evaluation race.
+evaluation_max_episode_steps: 6000
 
 # Empty for the first overnight run. Later, map CPU slots to frozen Player 1
 # RAM checkpoints, e.g. {1: zoo/dino_ram/best_model.zip}.

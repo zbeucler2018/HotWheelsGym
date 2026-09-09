@@ -17,6 +17,7 @@ from .callbacks import RAMEvalCallback
 from .common import (
     DEFAULT_CONFIG,
     DEFAULT_RUN_ROOT,
+    evaluation_episode_steps,
     load_config,
     make_ram_env,
     normalize_opponents,
@@ -123,9 +124,7 @@ def main() -> None:
                 seed=int(config["seed"]) + index,
                 opponent_paths=opponent_paths,
                 opponent_max_turn=int(config["opponent_max_turn"]),
-                opponent_max_target_speed=int(
-                    config["opponent_max_target_speed"]
-                ),
+                opponent_max_target_speed=int(config["opponent_max_target_speed"]),
                 state_path=str(state) if state else None,
                 monitor_path=str(run_dir / "monitor" / f"worker_{index}"),
             )
@@ -146,7 +145,7 @@ def main() -> None:
     try:
         eval_env = make_ram_env(
             frame_skip=int(config["frame_skip"]),
-            max_episode_steps=int(config["max_episode_steps"]),
+            max_episode_steps=evaluation_episode_steps(config),
             seed=int(config["seed"]) + 10_000,
             opponent_paths=opponent_paths,
             opponent_max_turn=int(config["opponent_max_turn"]),
@@ -186,7 +185,7 @@ def main() -> None:
                 eval_every_timesteps=int(config["eval_every_timesteps"]),
                 episodes=int(config["eval_episodes"]),
                 max_episode_frames=(
-                    int(config["max_episode_steps"]) * int(config["frame_skip"])
+                    evaluation_episode_steps(config) * int(config["frame_skip"])
                 ),
                 output_dir=run_dir / "evaluation",
             )
@@ -208,8 +207,7 @@ def main() -> None:
             model.save(run_dir / "final_model")
             print(f"Final model saved to {run_dir / 'final_model.zip'}")
             print(
-                f"Best model saved to "
-                f"{run_dir / 'evaluation' / 'best_model.zip'}"
+                f"Best model saved to " f"{run_dir / 'evaluation' / 'best_model.zip'}"
             )
             completed = True
         finally:
@@ -217,7 +215,11 @@ def main() -> None:
     finally:
         training_env.close()
 
-    if completed and bool(config.get("record_video", True)) and not args.no_record_video:
+    if (
+        completed
+        and bool(config.get("record_video", True))
+        and not args.no_record_video
+    ):
         from .record import record_model
 
         video_path = run_dir / "best_model.mp4"

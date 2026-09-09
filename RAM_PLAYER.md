@@ -37,6 +37,10 @@ The default configuration is
 emulator workers, four emulator frames per policy decision, and a 128×128 MLP.
 This leaves one core available for PPO updates on the Intel N150.
 
+Training episodes remain capped at 4,500 decisions, while start-line
+evaluation and recording use the separate 6,000-decision horizon. This allows
+slower early policies to finish without lengthening every training rollout.
+
 Watch it with:
 
 ```bash
@@ -62,6 +66,23 @@ After the environments close, the trainer automatically records one
 deterministic start-line race using `evaluation/best_model.zip`. The MP4 plays
 at real-time speed (15 encoded frames per second for four-frame action repeat).
 Pass `--no-record-video` only when this final recording is not wanted.
+
+## Re-evaluate a completed run
+
+The checkpoint sweep evaluates every periodic checkpoint plus `final_model.zip`
+with a finish-capable horizon. It copies the fastest finisher, records a fresh
+start-line MP4, and logs every checkpoint metric plus an accelerated replay to
+TensorBoard:
+
+```bash
+python3 -m training_scripts.ram_player.sweep \
+  --rom rom.gba \
+  --run-dir training_scripts/ram_runs/RUN
+```
+
+Use TensorBoard's **Scalars** tab for checkpoint curves, **Text** for the result
+table, and **Images** for the animated race replay. The full-quality MP4 and a
+CSV/JSON report remain in the sweep directory.
 
 ## Observation and action contract
 
@@ -90,6 +111,13 @@ The CPU patch currently exposes heading and target speed, not its boost/trick
 state. Actions 5 and 6 therefore degrade to straight acceleration when the same
 checkpoint controls a CPU. Steering is relative to the racer's current heading,
 so the policy—not the original waypoint AI—owns the CPU's line.
+
+Loading a Player 1 checkpoint into a CPU slot proves the shared observation and
+control path, but does not guarantee equal driving performance. Native Player 1
+button steering and the patched CPU heading/target-speed boundary have different
+dynamics. Always run `self_play_eval` before using a checkpoint as a curriculum
+opponent; a model that is fast as Player 1 may still need a more symmetric
+control translation or opponent-aware training before it is a strong NPC.
 
 ## Self-play against prior Player 1 models
 
@@ -129,4 +157,19 @@ The comparison defaults to `zoo/dbm_basic/best_model.zip`, runs five races per
 model, and writes episode CSV, summary JSON, and TensorBoard scalars under
 `training_scripts/ram_runs/comparison_*`. Rewards are retained for debugging,
 but the meaningful comparison is finish rate, raw frames/time, completion, and
-rank because the pixel and RAM reward functions differ.
+rank because the pixel and RAM reward functions differ. It also records one
+MP4 per model and embeds accelerated replays in TensorBoard's **Images** tab.
+
+## Validate a checkpoint as an NPC
+
+This records the selected RAM model driving both Player 1 and one patched CPU
+slot, with separate Player/NPC telemetry and a TensorBoard replay:
+
+```bash
+python3 -m training_scripts.ram_player.self_play_eval \
+  --rom rom.gba \
+  --player-model training_scripts/ram_runs/RUN/evaluation_sweep_RUN/fastest_model.zip
+```
+
+The generated patched ROM stays inside the ignored output directory. The
+source ROM and generated ROM are never added to Git.

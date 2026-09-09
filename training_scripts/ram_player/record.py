@@ -7,18 +7,18 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-import imageio_ffmpeg
-import numpy as np
 from stable_baselines3 import PPO
 
 from .common import (
     DEFAULT_CONFIG,
     ENV_ID,
+    evaluation_episode_steps,
     load_config,
     make_ram_env,
     normalize_opponents,
     prepare_rom,
 )
+from .media import RGBVideoWriter
 
 
 def record_model(
@@ -39,7 +39,7 @@ def record_model(
     frame_skip = int(config["frame_skip"])
     env = make_ram_env(
         frame_skip=frame_skip,
-        max_episode_steps=int(config["max_episode_steps"]),
+        max_episode_steps=evaluation_episode_steps(config),
         seed=int(config["seed"]) + 30_000,
         opponent_paths=opponent_paths,
         opponent_max_turn=int(config["opponent_max_turn"]),
@@ -47,23 +47,7 @@ def record_model(
     )
     model = PPO.load(model_path, device=device)
     observation, info = env.reset(seed=int(config["seed"]) + 30_000)
-    first_frame = np.asarray(env.render(), dtype=np.uint8)
-    if first_frame.ndim != 3 or first_frame.shape[2] != 3:
-        env.close()
-        raise RuntimeError(f"unexpected RGB frame shape: {first_frame.shape}")
-    height, width = first_frame.shape[:2]
-    encoder = imageio_ffmpeg.write_frames(
-        str(video_path),
-        (width, height),
-        fps=60 / frame_skip,
-        codec="libx264",
-        pix_fmt_in="rgb24",
-        pix_fmt_out="yuv420p",
-        macro_block_size=1,
-        ffmpeg_log_level="warning",
-    )
-    encoder.send(None)
-    encoder.send(np.ascontiguousarray(first_frame))
+    encoder = RGBVideoWriter(video_path, env.render(), fps=60 / frame_skip)
     terminated = truncated = False
     reward_sum = 0.0
     decision_steps = 0
@@ -73,9 +57,7 @@ def record_model(
             observation, reward, terminated, truncated, info = env.step(action)
             reward_sum += float(reward)
             decision_steps += 1
-            encoder.send(
-                np.ascontiguousarray(np.asarray(env.render(), dtype=np.uint8))
-            )
+            encoder.write(env.render())
     finally:
         encoder.close()
         env.close()
@@ -85,12 +67,27 @@ def record_model(
         "model": str(model_path),
         "video": str(video_path),
         "decision_steps": decision_steps,
-        "raw_frames": int(info.get("ram_player_raw_frame", decision_steps * frame_skip)),
+        "raw_frames": int(
+            info.get("ram_player_raw_frame", decision_steps * frame_skip)
+        ),
         "reward": reward_sum,
         "finished": bool(info.get("ram_player_finished", False)),
         "completion": float(info.get("ram_player_completion", 0.0)),
         "rank": int(info.get("ram_player_rank", 4)),
     }
+    if opponent_paths:
+        result["opponents"] = {
+            str(slot): {
+                "finished": bool(info.get(f"ram_npc_{slot}_finished", False)),
+                "finish_frame": info.get(f"ram_npc_{slot}_finish_frame"),
+                "completion": float(info.get(f"ram_npc_{slot}_completion", 0.0)),
+                "lap": int(info.get(f"ram_npc_{slot}_lap", 1)),
+                "rank": int(info.get(f"ram_npc_{slot}_rank", 4)),
+                "speed": int(info.get(f"ram_npc_{slot}_speed", 0)),
+                "action": int(info.get(f"ram_npc_{slot}_action", 0)),
+            }
+            for slot in sorted(opponent_paths)
+        }
     with video_path.with_suffix(".json").open("w") as handle:
         json.dump(result, handle, indent=2)
         handle.write("\n")
