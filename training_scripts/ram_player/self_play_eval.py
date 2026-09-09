@@ -115,6 +115,11 @@ def main() -> None:
         }
         for name, value in player_metrics.items():
             writer.add_scalar(f"self_play/player/{name}", value, 0)
+        writer.add_scalar(
+            "self_play/system/masked_opponent_respawn_flash_frames",
+            float(result.get("masked_opponent_respawn_flash_frames", 0)),
+            0,
+        )
         for slot, opponent in result["opponents"].items():
             opponent_metrics = {
                 "finished": float(opponent["finished"]),

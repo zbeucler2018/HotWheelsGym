@@ -22,6 +22,7 @@ RACER_SPEED_OFFSET = 0xE8
 RACER_X_OFFSET = 0xF8
 RACER_Z_OFFSET = 0x100
 RACER_PROGRESS_OFFSET = 0x148
+RACER_RESPAWN_PENDING_OFFSET = 0x26B
 RACER_STOCK_HEADING_SHADOW_OFFSET = 0x2EE
 RACER_TARGET_SPEED_OFFSET = 0x2F0
 RACER_PRESSED_OFFSET = 0x302
@@ -271,6 +272,14 @@ class RaceMemory:
             z=_signed_u32(_read_u32(self.memory, racer.address + RACER_Z_OFFSET)),
             rank=rank,
         )
+
+    def respawn_pending(self, slot: int) -> bool:
+        """Return whether a player-class racer has entered its respawn sequence."""
+
+        racer = self.layout.racer(slot)
+        if racer.kind != "player":
+            return False
+        return bool(_read_u8(self.memory, racer.address + RACER_RESPAWN_PENDING_OFFSET))
 
     def command(
         self,

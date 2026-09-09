@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import platform
@@ -228,7 +229,12 @@ def make_ram_env(
 ) -> gym.Env:
     base = HotWheelsGym.make(ENV_ID, render_mode="rgb_array")
     if state_path:
-        base.load_state(state_path)
+        state = Path(state_path).expanduser().resolve()
+        if not state.is_file():
+            raise FileNotFoundError(state)
+        with gzip.open(state, "rb") as handle:
+            base.unwrapped.initial_state = handle.read()
+        base.unwrapped.statename = str(state)
     env: gym.Env = base
     if opponent_paths:
         models = {

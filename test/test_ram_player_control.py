@@ -119,6 +119,26 @@ class RAMPlayerControlTests(unittest.TestCase):
             (released.pressed, released.released, released.held), (0, 0x21, 0)
         )
 
+    def test_player_class_respawn_pending_is_per_racer(self):
+        memory = state_memory(self.state_path)
+        stock = npc.RaceMemory(memory)
+        for slot in (0, 1, 2, 3):
+            memory.assign(
+                stock.layout.racer(slot).address, "<u4", npc.PLAYER_RACER_VTABLE
+            )
+        memory.assign(stock.layout.manager + npc.MANAGER_PLAYER_COUNT_OFFSET, "|u1", 4)
+        memory.assign(stock.layout.manager + npc.MANAGER_CPU_COUNT_OFFSET, "|u1", 0)
+        race = npc.RaceMemory(memory)
+
+        self.assertFalse(race.respawn_pending(0))
+        memory.assign(
+            race.layout.racer(3).address + npc.RACER_RESPAWN_PENDING_OFFSET,
+            "|u1",
+            1,
+        )
+        self.assertFalse(race.respawn_pending(0))
+        self.assertTrue(race.respawn_pending(3))
+
     def test_cpu_uses_same_discrete_intent(self):
         race = npc.RaceMemory(state_memory(self.state_path))
         state = race.state(1)

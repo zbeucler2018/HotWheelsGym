@@ -162,6 +162,17 @@ env = HotWheelsGym.DinoRAMModelOpponentEnv(
 env = HotWheelsGym.DinoRAMPlayerEnv(env)
 ```
 
+Player-class respawns normally flash the shared GBA framebuffer white. The
+opponent wrapper identifies the game's per-racer respawn-pending flag and, for
+an opponent-only respawn, holds the last visible frame until the flash ends.
+This keeps a pixel-based Player 1 policy from receiving blank observations and
+keeps evaluation video readable without changing racer physics or positions.
+A genuine Player 1 respawn is not masked. Set
+`mask_opponent_respawn_flashes=False` on `DinoRAMModelOpponentEnv` to expose the
+original framebuffer behavior. The info dictionary reports the current mask
+and cumulative masked-frame count under `ram_opponent_respawn_flash_masked` and
+`ram_opponent_respawn_flash_frames`.
+
 ## Compare with the best pixel model
 
 After training, evaluate both models as Player 1 on separate start-line races:

@@ -80,6 +80,9 @@ def record_model(
         "rank": int(info.get("ram_player_rank", 4)),
     }
     if opponent_paths:
+        result["masked_opponent_respawn_flash_frames"] = int(
+            info.get("ram_opponent_respawn_flash_frames", 0)
+        )
         result["opponents"] = {
             str(slot): {
                 "finished": bool(info.get(f"ram_npc_{slot}_finished", False)),

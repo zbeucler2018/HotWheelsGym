@@ -41,6 +41,22 @@ class PredictPolicy(Protocol):
     ) -> Any: ...
 
 
+RESPAWN_FLASH_CHANNEL_FLOOR = 235
+RESPAWN_FLASH_PIXEL_FRACTION = 0.9
+
+
+def _is_white_respawn_frame(observation: Any) -> bool:
+    """Recognize the full-screen white transition used by racer respawns."""
+
+    frame = np.asarray(observation)
+    return bool(
+        frame.ndim == 3
+        and frame.shape[-1] >= 3
+        and np.mean(np.all(frame[..., :3] > RESPAWN_FLASH_CHANNEL_FLOOR, axis=-1))
+        > RESPAWN_FLASH_PIXEL_FRACTION
+    )
+
+
 def _bare_env(env: gym.Env) -> Any:
     return env.unwrapped
 
@@ -288,6 +304,7 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         action_repeat: int = 4,
         max_turn: int = DEFAULT_MAX_TURN,
         max_target_speed: int = DEFAULT_MAX_TARGET_SPEED,
+        mask_opponent_respawn_flashes: bool = True,
     ) -> None:
         _validate_dino_multi(env)
         slots = tuple(sorted(opponents))
@@ -303,6 +320,7 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         self.action_repeat = action_repeat
         self.max_turn = max_turn
         self.max_target_speed = max_target_speed
+        self.mask_opponent_respawn_flashes = mask_opponent_respawn_flashes
         self._race: RaceMemory | None = None
         self._progress: RaceProgressTracker | None = None
         self._states: dict[int, RacerState] | None = None
@@ -314,6 +332,10 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         self._button_masks: dict[int, int] = {}
         self._control_mode: str | None = None
         self._raw_frame = 0
+        self._last_visible_frame: np.ndarray | None = None
+        self._render_override: np.ndarray | None = None
+        self._masking_opponent_respawn = False
+        self._masked_respawn_frames = 0
 
     def _observation(self, slot: int) -> np.ndarray:
         if (
@@ -354,6 +376,15 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         self._finished = {slot: False for slot in slots}
         self._finish_frames = {slot: None for slot in slots}
         self._raw_frame = 0
+        initial_frame = np.asarray(observation)
+        self._last_visible_frame = (
+            np.array(initial_frame, copy=True)
+            if initial_frame.ndim == 3 and initial_frame.shape[-1] >= 3
+            else None
+        )
+        self._render_override = None
+        self._masking_opponent_respawn = False
+        self._masked_respawn_frames = 0
         total_laps = int(_bare_env(self.env).total_laps)
         for slot in slots:
             info.update(
@@ -419,6 +450,40 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         self._states = current_states
         total_laps = int(_bare_env(self.env).total_laps)
 
+        white_frame = _is_white_respawn_frame(observation)
+        player_respawn_pending = self._race.respawn_pending(0)
+        opponent_respawn_slots = tuple(
+            slot for slot in self.opponents if self._race.respawn_pending(slot)
+        )
+        starts_opponent_only_flash = bool(
+            white_frame and opponent_respawn_slots and not player_respawn_pending
+        )
+        if (
+            self.mask_opponent_respawn_flashes
+            and white_frame
+            and not player_respawn_pending
+            and (self._masking_opponent_respawn or starts_opponent_only_flash)
+        ):
+            self._masking_opponent_respawn = True
+            self._masked_respawn_frames += 1
+            if self._last_visible_frame is not None:
+                observation = np.array(self._last_visible_frame, copy=True)
+                self._render_override = np.array(self._last_visible_frame, copy=True)
+        else:
+            self._render_override = None
+            if not white_frame:
+                frame = np.asarray(observation)
+                if frame.ndim == 3 and frame.shape[-1] >= 3:
+                    self._last_visible_frame = np.array(frame, copy=True)
+                self._masking_opponent_respawn = False
+
+        info["ram_opponent_respawn_flash_masked"] = bool(
+            self._render_override is not None
+        )
+        info["ram_opponent_respawn_flash_frames"] = self._masked_respawn_frames
+        info["ram_player_respawn_pending"] = player_respawn_pending
+        info["ram_opponent_respawn_pending_slots"] = opponent_respawn_slots
+
         for slot, command in commands.items():
             if (
                 not self._finished[slot]
@@ -447,3 +512,8 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
                 info[f"{prefix}command_heading"] = command.desired_heading
                 info[f"{prefix}command_speed"] = command.target_speed
         return observation, reward, terminated, truncated, info
+
+    def render(self) -> Any:
+        if self._render_override is not None:
+            return np.array(self._render_override, copy=True)
+        return self.env.render()

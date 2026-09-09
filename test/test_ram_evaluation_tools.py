@@ -6,12 +6,21 @@ import numpy as np
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 from torch.utils.tensorboard import SummaryWriter
 
+from HotWheelsGym.RAMOpponent import _is_white_respawn_frame
 from training_scripts.ram_player.common import require_all_opponent_slots
 from training_scripts.ram_player.media import RGBVideoWriter, log_video_replay
 from training_scripts.ram_player.sweep import checkpoint_sort_key
 
 
 class RAMEvaluationToolTests(unittest.TestCase):
+    def test_white_respawn_frame_detection_rejects_normal_frames(self):
+        normal = np.zeros((16, 16, 3), dtype=np.uint8)
+        white = np.full((16, 16, 3), 255, dtype=np.uint8)
+        white[:1, :1] = 0
+
+        self.assertFalse(_is_white_respawn_frame(normal))
+        self.assertTrue(_is_white_respawn_frame(white))
+
     def test_native_button_runs_require_every_opponent_slot(self):
         require_all_opponent_slots({})
         require_all_opponent_slots({1: "model", 2: "model", 3: "model"})

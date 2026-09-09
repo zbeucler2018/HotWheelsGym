@@ -126,6 +126,22 @@ In the same 120-frame test, CPU 1's stock target of 59,904 yielded current speed
 progress 109. The native update smoothly approaches the supplied target while
 retaining the rest of the CPU racer's physics.
 
+## Player-class opponent respawns
+
+The native-button patch makes each opponent a player-class racer, so a failed
+trick uses the player-class respawn path. Frame-level Stable-Retro telemetry on
+the Dino self-play recording reproduced three independent opponent teleports:
+slot 2 at frame 3,266, slot 1 at frame 3,331, and slot 3 at frame 4,465. Player
+1 did not teleport in any case. At the visible frame-4,465 event, Player 1 kept
+progress 172 and speed 32,918 with unchanged coordinates while only slot 3
+jumped 481,995 coordinate units and advanced from progress 162 to 164.
+
+The player-class path does whiten the shared framebuffer during an opponent
+respawn. Racer byte `+0x26B` identifies the per-racer pending transition in the
+reproduced sequence. `DinoRAMModelOpponentEnv` masks only an opponent-only
+white transition by returning and rendering its last visible frame; it leaves
+the emulator state untouched and does not mask a real Player 1 respawn.
+
 ## Savestate layout and NPC score identity
 
 The gzip payload is `0x61000` bytes. EWRAM is the `0x40000`-byte region at
