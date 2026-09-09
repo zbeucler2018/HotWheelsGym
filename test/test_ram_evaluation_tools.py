@@ -6,11 +6,18 @@ import numpy as np
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 from torch.utils.tensorboard import SummaryWriter
 
+from training_scripts.ram_player.common import require_all_opponent_slots
 from training_scripts.ram_player.media import RGBVideoWriter, log_video_replay
 from training_scripts.ram_player.sweep import checkpoint_sort_key
 
 
 class RAMEvaluationToolTests(unittest.TestCase):
+    def test_native_button_runs_require_every_opponent_slot(self):
+        require_all_opponent_slots({})
+        require_all_opponent_slots({1: "model", 2: "model", 3: "model"})
+        with self.assertRaisesRegex(ValueError, "slots 1, 2, and 3"):
+            require_all_opponent_slots({1: "model"})
+
     def test_checkpoint_selection_prefers_finish_then_speed(self):
         partial = {
             "finish_rate": 0.0,

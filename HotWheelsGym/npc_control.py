@@ -8,7 +8,6 @@ from pathlib import Path
 import struct
 from typing import Mapping, Protocol, Sequence
 
-
 EWRAM_BASE = 0x02000000
 EWRAM_SIZE = 0x40000
 
@@ -17,6 +16,7 @@ CPU_RACER_VTABLE = 0x0817B6D4
 RACER_MANAGER_OFFSET = 0x50
 RACER_VEHICLE_INDEX_OFFSET = 0xDC
 RACER_CURRENT_HEADING_OFFSET = 0xDE
+RACER_STEERING_HEADING_OFFSET = 0xD8
 RACER_DESIRED_HEADING_OFFSET = 0xE0
 RACER_SPEED_OFFSET = 0xE8
 RACER_X_OFFSET = 0xF8
@@ -24,6 +24,9 @@ RACER_Z_OFFSET = 0x100
 RACER_PROGRESS_OFFSET = 0x148
 RACER_STOCK_HEADING_SHADOW_OFFSET = 0x2EE
 RACER_TARGET_SPEED_OFFSET = 0x2F0
+RACER_PRESSED_OFFSET = 0x302
+RACER_RELEASED_OFFSET = 0x304
+RACER_HELD_OFFSET = 0x306
 
 MANAGER_PLAYER_COUNT_OFFSET = 0x448
 MANAGER_CPU_COUNT_OFFSET = 0x449
@@ -33,6 +36,9 @@ MANAGER_POINTER_LIST_OFFSET = 0x450
 NPC_CONTROL_MARKER_OFFSET = 0x79BF08
 NPC_CONTROL_MARKER = b"HWNP"
 NPC_CONTROL_PATCH_VERSION = 1
+NPC_BUTTON_CONTROL_MARKER_OFFSET = 0x79BEF4
+NPC_BUTTON_CONTROL_MARKER = b"HWBT"
+NPC_BUTTON_CONTROL_PATCH_VERSION = 3
 
 HEADING_PERIOD = 0x1000
 DEFAULT_MAX_TURN = 0x200
@@ -96,6 +102,14 @@ class RaceLayout:
         racer = self.racer(slot)
         if racer.kind != "cpu":
             raise ValueError(f"racer slot {slot} is {racer.kind}, not a native CPU")
+        return racer
+
+    def opponent(self, slot: int) -> RacerRef:
+        """Return a non-Player-1 racer, including a converted player-class NPC."""
+
+        racer = self.racer(slot)
+        if slot == 0:
+            raise ValueError("racer slot 0 is Player 1, not an opponent")
         return racer
 
 
@@ -290,9 +304,7 @@ class RaceMemory:
         """Seed the patch-owned observation field from the savestate heading."""
 
         racer = self.layout.cpu(slot)
-        desired = _read_u16(
-            self.memory, racer.address + RACER_DESIRED_HEADING_OFFSET
-        )
+        desired = _read_u16(self.memory, racer.address + RACER_DESIRED_HEADING_OFFSET)
         self.memory.assign(
             racer.address + RACER_STOCK_HEADING_SHADOW_OFFSET,
             "<u2",
@@ -324,7 +336,11 @@ class RaceMemory:
             _clip((player.x - state.x) / (1 << 22), -1.0, 1.0),
             _clip((player.z - state.z) / (1 << 22), -1.0, 1.0),
             _clip((state.rank - 1) / max(1, len(self.layout.racers) - 1), 0.0, 1.0),
-            _clip(heading_delta(state.desired_heading, state.current_heading) / 0x800, -1.0, 1.0),
+            _clip(
+                heading_delta(state.desired_heading, state.current_heading) / 0x800,
+                -1.0,
+                1.0,
+            ),
         )
         return features
 
@@ -357,9 +373,9 @@ def command_from_action(
         raise ValueError("NPC action values must be finite")
     steering = _clip(steering, -1.0, 1.0)
     throttle = _clip(throttle, 0.0, 1.0)
-    desired_heading = (
-        state.current_heading + round(steering * max_turn)
-    ) & (HEADING_PERIOD - 1)
+    desired_heading = (state.current_heading + round(steering * max_turn)) & (
+        HEADING_PERIOD - 1
+    )
     return NPCCommand(desired_heading, round(throttle * max_target_speed))
 
 
@@ -388,4 +404,20 @@ def controlled_vehicle_indices_from_rom(path: Path) -> tuple[int, ...]:
     mask = marker[5]
     if mask & ~0x0E:
         raise ValueError(f"invalid NPC-control vehicle mask: {mask:#x}")
+    return tuple(index for index in (1, 2, 3) if mask & (1 << index))
+
+
+def button_controlled_vehicle_indices_from_rom(path: Path) -> tuple[int, ...]:
+    """Read the native-button vehicle mask embedded by ``patch-npc-buttons``."""
+
+    with path.open("rb") as handle:
+        handle.seek(NPC_BUTTON_CONTROL_MARKER_OFFSET)
+        marker = handle.read(8)
+    if marker[:4] != NPC_BUTTON_CONTROL_MARKER:
+        return ()
+    if len(marker) != 8 or marker[4] != NPC_BUTTON_CONTROL_PATCH_VERSION:
+        raise ValueError("unsupported NPC button-control ROM patch marker")
+    mask = marker[5]
+    if mask != 0x0E:
+        raise ValueError(f"invalid NPC button-control vehicle mask: {mask:#x}")
     return tuple(index for index in (1, 2, 3) if mask & (1 << index))

@@ -21,7 +21,9 @@ from .common import (
     load_config,
     make_ram_env,
     normalize_opponents,
+    opponent_state_path,
     prepare_rom,
+    require_all_opponent_slots,
     training_state_paths,
     write_run_metadata,
 )
@@ -59,7 +61,12 @@ def _parser() -> argparse.ArgumentParser:
         action="append",
         type=_opponent,
         metavar="SLOT=RAM_MODEL_PATH",
-        help="replace configured self-play opponents; repeat for more CPU slots",
+        help="replace configured self-play opponents; repeat for more slots",
+    )
+    parser.add_argument(
+        "--opponent-state",
+        type=Path,
+        help="fresh Dino state containing four player-class racers",
     )
     parser.add_argument("--device", default="cpu")
     return parser
@@ -91,13 +98,18 @@ def main() -> None:
         if len(dict(args.opponent)) != len(args.opponent):
             raise ValueError("each self-play opponent slot may appear only once")
         config["opponents"] = dict(args.opponent)
+    if args.opponent_state is not None:
+        config["opponent_state"] = str(args.opponent_state.expanduser().resolve())
     if int(config["total_timesteps"]) < 1:
         raise ValueError("timesteps must be at least one")
     if int(config["num_envs"]) < 1:
         raise ValueError("num-envs must be at least one")
 
     opponents = normalize_opponents(config["opponents"])
-    states = training_state_paths(config)
+    require_all_opponent_slots(opponents)
+    states = (
+        [opponent_state_path(config)] if opponents else training_state_paths(config)
+    )
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = args.run_root.expanduser().resolve() / f"{config['run_name']}_{timestamp}"
     run_dir.mkdir(parents=True, exist_ok=False)
@@ -150,6 +162,7 @@ def main() -> None:
             opponent_paths=opponent_paths,
             opponent_max_turn=int(config["opponent_max_turn"]),
             opponent_max_target_speed=int(config["opponent_max_target_speed"]),
+            state_path=str(states[0]) if opponents else None,
         )
         try:
             if args.resume_model:

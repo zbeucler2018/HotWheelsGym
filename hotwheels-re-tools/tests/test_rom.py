@@ -7,11 +7,17 @@ from hotwheels_re_tools.rom import (
     NPC_CONTROL_ROM_SHA1S,
     NPC_CONTROL_SITE,
     NPC_CONTROL_TRAMPOLINE,
+    NPC_BUTTON_CONTROL_SITE,
+    NPC_BUTTON_CPU_COUNT_SITES,
+    NPC_BUTTON_PLAYER_COUNT_SITES,
+    NPC_BUTTON_CONTROL_TRAMPOLINE,
     PLAYER_RACER_CONSTRUCTOR,
     apply_checked_patches,
+    button_controlled_vehicle_indices,
     controlled_vehicle_indices,
     decode_thumb_bl,
     encode_thumb_bl,
+    npc_button_control_patches,
     npc_control_patches,
 )
 
@@ -38,7 +44,9 @@ class ThumbBranchTests(unittest.TestCase):
             (0x080FBAB8, 0x080F5888),
             (0x080FBAB8, 0x08101618),
         ]:
-            self.assertEqual(decode_thumb_bl(encode_thumb_bl(source, target), source), target)
+            self.assertEqual(
+                decode_thumb_bl(encode_thumb_bl(source, target), source), target
+            )
 
     def test_checked_patch_rejects_unexpected_input(self) -> None:
         size = max(patch.offset + len(patch.expected) for patch in MIRROR_CPU_PATCHES)
@@ -82,6 +90,29 @@ class ThumbBranchTests(unittest.TestCase):
             set(NPC_CONTROL_ROM_SHA1S),
             {(1,), (2,), (3,), (1, 2), (1, 3), (2, 3), (1, 2, 3)},
         )
+
+    def test_native_button_patch_converts_every_cpu_and_embeds_marker(self) -> None:
+        patches = npc_button_control_patches()
+        self.assertEqual(
+            tuple(patch.address for patch in patches[:4]),
+            (
+                NPC_BUTTON_CPU_COUNT_SITES[0],
+                NPC_BUTTON_PLAYER_COUNT_SITES[0],
+                NPC_BUTTON_CPU_COUNT_SITES[1],
+                NPC_BUTTON_PLAYER_COUNT_SITES[1],
+            ),
+        )
+        self.assertEqual(patches[4].address, NPC_BUTTON_CONTROL_SITE)
+        self.assertEqual(
+            decode_thumb_bl(patches[4].replacement, patches[4].address),
+            NPC_BUTTON_CONTROL_TRAMPOLINE,
+        )
+        size = max(patch.offset + len(patch.expected) for patch in patches)
+        source = bytearray(size)
+        for patch in patches:
+            source[patch.offset : patch.offset + len(patch.expected)] = patch.expected
+        output = apply_checked_patches(bytes(source), patches)
+        self.assertEqual(button_controlled_vehicle_indices(output), (1, 2, 3))
 
 
 if __name__ == "__main__":

@@ -2,10 +2,10 @@
 
 This is a separate training path from `training_scripts/train_ppo.py`. It trains
 Player 1 from compact racer RAM, not pixels, and produces checkpoints that can
-also replace selected native CPU controls for self-play.
+also replace the stock opponents with model-controlled player-class racers.
 
 The first run races the stock CPU opponents. Later runs can load any prior RAM
-Player 1 checkpoint into CPU slots 1–3 as frozen opponents. The game still owns
+Player 1 checkpoint into slots 1–3 as frozen opponents. The game still owns
 physics, collision, rendering, and race management.
 
 ## Install and preflight
@@ -13,8 +13,9 @@ physics, collision, rendering, and race management.
 From the repository root:
 
 ```bash
-python3 -m pip install -e '.[train,dev]'
-python3 -m training_scripts.ram_player.smoke_test --rom rom.gba
+uv venv
+uv pip install -e '.[train,dev]'
+uv run --no-project python -m training_scripts.ram_player.smoke_test --rom rom.gba
 ```
 
 The smoke test loads a configured historical state and takes a few fixed
@@ -24,12 +25,12 @@ depends on the installed Stable-Retro core.
 
 The source ROM must remain local and uncommitted. `*.gba` and every RAM run
 directory are ignored. For self-play, the runner privately generates the exact
-selected-slot ROM under the ignored run directory.
+native-button ROM under the ignored run directory.
 
 ## First overnight run
 
 ```bash
-python3 -m training_scripts.ram_player.train --rom rom.gba
+uv run --no-project python -m training_scripts.ram_player.train --rom rom.gba
 ```
 
 The default configuration is
@@ -86,7 +87,8 @@ CSV/JSON report remain in the sweep directory.
 
 ## Observation and action contract
 
-Every controlled racer—Player 1 or a CPU—gets the same 43 normalized floats:
+Every controlled racer—Player 1 or an opponent—gets the same 43 normalized
+floats, rotated so that racer is always the observation's ego:
 
 - heading sine/cosine, absolute Dino X/Z, speed, and checkpoint phase;
 - tracked lap and race rank;
@@ -97,49 +99,66 @@ Every controlled racer—Player 1 or a CPU—gets the same 43 normalized floats:
 
 There are seven discrete actions:
 
-| Index | Intent | Player 1 buttons | Patched CPU interpretation |
+| Index | Intent | Player 1 and opponent buttons |
 | ---: | --- | --- | --- |
-| 0 | coast | none | straight, target speed 0 |
-| 1 | accelerate | A | straight, maximum target speed |
-| 2 | accelerate left | A + Left | left heading request, maximum speed |
-| 3 | accelerate right | A + Right | right heading request, maximum speed |
-| 4 | brake | B | straight, target speed 0 |
-| 5 | accelerate/up | A + Up | straight, maximum target speed |
-| 6 | boost | A + L + R | straight, maximum target speed |
+| 0 | coast | none |
+| 1 | accelerate | A |
+| 2 | accelerate left | A + Left |
+| 3 | accelerate right | A + Right |
+| 4 | brake | B |
+| 5 | accelerate/up | A + Up |
+| 6 | boost | A + L + R |
 
-The CPU patch currently exposes heading and target speed, not its boost/trick
-state. Actions 5 and 6 therefore degrade to straight acceleration when the same
-checkpoint controls a CPU. Steering is relative to the racer's current heading,
-so the policy—not the original waypoint AI—owns the CPU's line.
-
-Loading a Player 1 checkpoint into a CPU slot proves the shared observation and
-control path, but does not guarantee equal driving performance. Native Player 1
-button steering and the patched CPU heading/target-speed boundary have different
-dynamics. Always run `self_play_eval` before using a checkpoint as a curriculum
-opponent; a model that is fast as Player 1 may still need a more symmetric
-control translation or opponent-aware training before it is a strong NPC.
+The native-button ROM makes all four race slots genuine player-class racers.
+Player 1 continues sampling the hardware keypad; slots 1–3 instead retain the
+independent pressed/released/held masks written by Python. This means steering,
+braking, boost, physics, collisions, and lap handling all use the exact same
+game code for Player 1 and model opponents.
 
 ## Self-play against prior Player 1 models
 
-Use the original `rom.gba`; the command creates and imports an ignored private
-patch containing exactly the selected CPU slots:
+Stable-Retro savestates restore racer objects after construction. Therefore an
+old checked-in multiplayer state still contains stock CPU objects even with the
+new ROM. First create one private Dino Boneyard start-line state under the
+patched ROM. This drives a known Player 1 checkpoint through the source race,
+selects Retry, and saves only after all four player-class racers have valid grid
+coordinates; it performs no training:
 
 ```bash
-python3 -m training_scripts.ram_player.train \
+uv run --no-project python -m training_scripts.ram_player.create_opponent_state \
   --rom rom.gba \
-  --run-name dino_ram_selfplay_1 \
-  --opponent 1=training_scripts/ram_runs/PRIOR_RUN/evaluation/best_model.zip
+  --player-model training_scripts/ram_runs/PRIOR_RUN/evaluation/best_model.zip \
+  --output training_scripts/ram_runs/private/dino_four_players.state
 ```
 
-Repeat `--opponent` to fill more slots. Each worker loads frozen copies. Player
-1 continues learning while the opponent checkpoints remain unchanged.
+Both the generated ROM and state stay under the ignored `ram_runs` tree. Use
+the original `rom.gba` for the trainer; it privately generates and imports the
+native-button ROM, then loads the four-player state:
+
+```bash
+uv run --no-project python -m training_scripts.ram_player.train \
+  --rom rom.gba \
+  --run-name dino_ram_selfplay_1 \
+  --opponent 1=training_scripts/ram_runs/PRIOR_RUN/evaluation/best_model.zip \
+  --opponent 2=training_scripts/ram_runs/PRIOR_RUN/evaluation/best_model.zip \
+  --opponent 3=training_scripts/ram_runs/PRIOR_RUN/evaluation/best_model.zip \
+  --opponent-state training_scripts/ram_runs/private/dino_four_players.state
+```
+
+All three opponent slots must be assigned because the symmetric ROM converts
+all of them to externally controlled player-class racers. Reusing one checkpoint
+for all three is supported, as shown above. Each worker loads frozen copies;
+Player 1 continues learning while the opponent checkpoints remain unchanged.
 
 You can also configure the mapping under `opponents` in the YAML file. The same
 wrapper is reusable in code:
 
 ```python
 base = HotWheelsGym.make("HWSTC-dino_boneyard-multi-3", render_mode="rgb_array")
-env = HotWheelsGym.DinoRAMModelOpponentEnv(base, {1: frozen_ram_model})
+env = HotWheelsGym.DinoRAMModelOpponentEnv(
+    base,
+    {1: frozen_ram_model, 2: frozen_ram_model, 3: frozen_ram_model},
+)
 env = HotWheelsGym.DinoRAMPlayerEnv(env)
 ```
 
@@ -148,7 +167,7 @@ env = HotWheelsGym.DinoRAMPlayerEnv(env)
 After training, evaluate both models as Player 1 on separate start-line races:
 
 ```bash
-python3 -m training_scripts.ram_player.compare \
+uv run --no-project python -m training_scripts.ram_player.compare \
   --rom rom.gba \
   --ram-model training_scripts/ram_runs/RUN/evaluation/best_model.zip
 ```
@@ -162,13 +181,15 @@ MP4 per model and embeds accelerated replays in TensorBoard's **Images** tab.
 
 ## Validate a checkpoint as an NPC
 
-This records the selected RAM model driving both Player 1 and one patched CPU
-slot, with separate Player/NPC telemetry and a TensorBoard replay:
+This records the selected RAM model driving Player 1 and all three opponent
+slots, with per-racer telemetry and a TensorBoard replay:
 
 ```bash
-python3 -m training_scripts.ram_player.self_play_eval \
+uv run --no-project python -m training_scripts.ram_player.self_play_eval \
   --rom rom.gba \
-  --player-model training_scripts/ram_runs/RUN/evaluation_sweep_RUN/fastest_model.zip
+  --player-model training_scripts/ram_runs/RUN/evaluation_sweep_RUN/fastest_model.zip \
+  --state training_scripts/ram_runs/private/dino_four_players.state \
+  --max-episode-steps 7000
 ```
 
 The generated patched ROM stays inside the ignored output directory. The

@@ -16,7 +16,9 @@ from .common import (
     load_config,
     make_ram_env,
     normalize_opponents,
+    opponent_state_path,
     prepare_rom,
+    require_all_opponent_slots,
 )
 from .media import RGBVideoWriter
 
@@ -35,6 +37,7 @@ def record_model(
     video_path = video_path.expanduser().resolve()
     if not model_path.is_file():
         raise FileNotFoundError(model_path)
+    require_all_opponent_slots(opponent_paths or {})
     video_path.parent.mkdir(parents=True, exist_ok=True)
     frame_skip = int(config["frame_skip"])
     env = make_ram_env(
@@ -44,6 +47,7 @@ def record_model(
         opponent_paths=opponent_paths,
         opponent_max_turn=int(config["opponent_max_turn"]),
         opponent_max_target_speed=int(config["opponent_max_target_speed"]),
+        state_path=(str(opponent_state_path(config)) if opponent_paths else None),
     )
     model = PPO.load(model_path, device=device)
     observation, info = env.reset(seed=int(config["seed"]) + 30_000)
@@ -101,8 +105,15 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--device", default="cpu")
+    parser.add_argument(
+        "--opponent-state",
+        type=Path,
+        help="fresh Dino state containing four player-class racers",
+    )
     args = parser.parse_args()
     config = load_config(args.config.expanduser().resolve())
+    if args.opponent_state is not None:
+        config["opponent_state"] = str(args.opponent_state.expanduser().resolve())
     opponents = normalize_opponents(config["opponents"])
     prepare_rom(args.rom, tuple(opponents), args.output.parent / "private")
     result = record_model(

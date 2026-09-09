@@ -11,9 +11,12 @@ max_episode_steps: 4500
 # Keep training rollouts bounded, but allow a full start-line evaluation race.
 evaluation_max_episode_steps: 6000
 
-# Empty for the first overnight run. Later, map CPU slots to frozen Player 1
-# RAM checkpoints, e.g. {1: zoo/dino_ram/best_model.zip}.
+# Empty for the first overnight run. Later, map opponent slots to frozen Player 1
+# RAM checkpoints, e.g. the same model path under keys 1, 2, and 3.
 opponents: {}
+# Required only when opponents is non-empty. This must be a private state made
+# after the native-button ROM constructed all four racers as player-class cars.
+opponent_state: null
 opponent_max_turn: 512
 opponent_max_target_speed: 73728
 

@@ -6,7 +6,6 @@ import sys
 import types
 import unittest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_NAME = "hotwheels_ram_test_package"
 package = types.ModuleType(PACKAGE_NAME)
@@ -74,9 +73,7 @@ class RAMPlayerControlTests(unittest.TestCase):
                     states, states, tracker, slot, 1
                 )
                 self.assertEqual(len(observation), ram.DINO_RAM_OBSERVATION_SIZE)
-                self.assertEqual(
-                    len(observation), len(ram.RAM_OBSERVATION_NAMES)
-                )
+                self.assertEqual(len(observation), len(ram.RAM_OBSERVATION_NAMES))
                 self.assertTrue(all(-1.0 <= value <= 1.0 for value in observation))
 
     def test_player_action_maps_to_accelerate_and_left_buttons(self):
@@ -85,6 +82,41 @@ class RAMPlayerControlTests(unittest.TestCase):
         self.assertEqual(
             {button for button, enabled in zip(buttons, mapped) if enabled},
             {"A", "LEFT"},
+        )
+
+    def test_player_and_converted_npc_actions_have_identical_buttons(self):
+        buttons = ("A", "B", "SELECT", "START", "RIGHT", "LEFT", "UP", "DOWN", "R", "L")
+        for action_index, action in enumerate(ram.RAM_ACTIONS):
+            with self.subTest(action=action.name):
+                player = ram.player_buttons_from_action(action_index, buttons)
+                player_names = {
+                    button for button, enabled in zip(buttons, player) if enabled
+                }
+                mask = ram.gba_button_mask_from_action(action_index)
+                npc_names = {
+                    name for name, bit in ram.GBA_BUTTON_BITS.items() if mask & bit
+                }
+                self.assertEqual(player_names, npc_names)
+
+    def test_converted_npc_button_writer_tracks_transitions(self):
+        memory = state_memory(self.state_path)
+        stock = npc.RaceMemory(memory)
+        for slot in (1, 2, 3):
+            memory.assign(
+                stock.layout.racer(slot).address, "<u4", npc.PLAYER_RACER_VTABLE
+            )
+        memory.assign(stock.layout.manager + npc.MANAGER_PLAYER_COUNT_OFFSET, "|u1", 4)
+        memory.assign(stock.layout.manager + npc.MANAGER_CPU_COUNT_OFFSET, "|u1", 0)
+        race = npc.RaceMemory(memory)
+        pressed = ram.write_racer_buttons(race, 1, 2, 0)
+        held = ram.write_racer_buttons(race, 1, 2, pressed.held)
+        released = ram.write_racer_buttons(race, 1, 0, held.held)
+        self.assertEqual(
+            (pressed.pressed, pressed.released, pressed.held), (0x21, 0, 0x21)
+        )
+        self.assertEqual((held.pressed, held.released, held.held), (0, 0, 0x21))
+        self.assertEqual(
+            (released.pressed, released.released, released.held), (0, 0x21, 0)
         )
 
     def test_cpu_uses_same_discrete_intent(self):
@@ -126,12 +158,29 @@ class RAMPlayerControlTests(unittest.TestCase):
         after[0] = state(0, 2)
         tracker.update(after)
         self.assertEqual(tracker.laps[0], 2)
+        self.assertEqual(tracker.current_lap(0, after[0]), 2)
         self.assertEqual(tracker.rank(0, after), 1)
 
-    def test_finished_race_reward_beats_partial_progress(self):
-        partial = ram.race_reward(
-            1, 60_000, 73_728, previous_rank=2, current_rank=1
+    def test_progress_tracker_derives_laps_from_monotonic_progress(self):
+        state = npc.RacerState(
+            slot=0,
+            vehicle_index=0,
+            current_heading=0,
+            desired_heading=0,
+            stock_heading=0,
+            speed=0,
+            target_speed=0,
+            progress=700,
+            x=0,
+            z=0,
+            rank=1,
         )
+        tracker = ram.RaceProgressTracker.from_states({0: state}, 342)
+        self.assertEqual(tracker.current_lap(0, state), 3)
+        self.assertAlmostEqual(tracker.completion(0, state, 3), 700 / 1026)
+
+    def test_finished_race_reward_beats_partial_progress(self):
+        partial = ram.race_reward(1, 60_000, 73_728, previous_rank=2, current_rank=1)
         finished = ram.race_reward(
             1,
             60_000,

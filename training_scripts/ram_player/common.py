@@ -18,7 +18,10 @@ from stable_baselines3.common.monitor import Monitor
 
 import HotWheelsGym
 from HotWheelsGym import DinoRAMModelOpponentEnv, DinoRAMPlayerEnv, RAMActionRepeat
-from HotWheelsGym.npc_control import controlled_vehicle_indices_from_rom
+from HotWheelsGym.npc_control import (
+    button_controlled_vehicle_indices_from_rom,
+    controlled_vehicle_indices_from_rom,
+)
 from HotWheelsGym.ram_opponent_control import RAM_ACTIONS, RAM_OBSERVATION_NAMES
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -113,12 +116,23 @@ def normalize_opponents(raw: Mapping[Any, Any]) -> dict[int, Path]:
     for raw_slot, raw_path in raw.items():
         slot = int(raw_slot)
         if slot not in (1, 2, 3):
-            raise ValueError("opponent CPU slots must be 1, 2, or 3")
+            raise ValueError("opponent slots must be 1, 2, or 3")
         path = resolve_repo_path(str(raw_path)).resolve()
         if not path.is_file():
             raise FileNotFoundError(path)
         opponents[slot] = path
     return opponents
+
+
+def require_all_opponent_slots(opponents: Mapping[int, Any]) -> None:
+    """Prevent converted but uncontrolled opponent cars from blocking the track."""
+
+    slots = set(opponents)
+    if slots and slots != {1, 2, 3}:
+        raise ValueError(
+            "native-button self-play must control opponent slots 1, 2, and 3; "
+            "reuse the same checkpoint for multiple slots if desired"
+        )
 
 
 def prepare_rom(
@@ -129,16 +143,22 @@ def prepare_rom(
     source_rom = source_rom.expanduser().resolve()
     if not source_rom.is_file():
         raise FileNotFoundError(source_rom)
-    controlled = controlled_vehicle_indices_from_rom(source_rom)
     requested = tuple(sorted(set(opponent_slots)))
+    button_controlled = button_controlled_vehicle_indices_from_rom(source_rom)
+    controlled = controlled_vehicle_indices_from_rom(source_rom)
+    if button_controlled and not set(requested).issubset(button_controlled):
+        raise ValueError(
+            f"{source_rom} controls vehicle indices {button_controlled}, but this run "
+            f"requests {requested}"
+        )
     if controlled and controlled != requested:
         raise ValueError(
             f"{source_rom} controls vehicle indices {controlled}, but this run needs "
             f"exactly {requested}; use the original ROM and let the runner patch it"
         )
-    if requested and not controlled:
+    if requested and not button_controlled and not controlled:
         private_dir.mkdir(parents=True, exist_ok=True)
-        active_rom = private_dir / "dino-self-play.gba"
+        active_rom = private_dir / "dino-native-buttons.gba"
         tool_source = REPO_ROOT / "hotwheels-re-tools" / "src"
         process_environment = os.environ.copy()
         current_pythonpath = process_environment.get("PYTHONPATH")
@@ -149,13 +169,11 @@ def prepare_rom(
             sys.executable,
             "-m",
             "hotwheels_re_tools",
-            "patch-npc-control",
+            "patch-npc-buttons",
             str(source_rom),
             str(active_rom),
+            "--force",
         ]
-        for slot in requested:
-            command.extend(("--vehicle-index", str(slot)))
-        command.append("--force")
         subprocess.run(
             command,
             cwd=REPO_ROOT,
@@ -180,6 +198,21 @@ def training_state_paths(config: dict[str, Any]) -> list[Path | None]:
             raise FileNotFoundError(state)
         states.append(state)
     return states
+
+
+def opponent_state_path(config: Mapping[str, Any]) -> Path:
+    """Resolve the fresh all-player state required by native-button opponents."""
+
+    raw_state = config.get("opponent_state")
+    if not raw_state:
+        raise ValueError(
+            "RAM model opponents require opponent_state: a Dino Boneyard state "
+            "created after patch-npc-buttons constructed four player-class racers"
+        )
+    state = resolve_repo_path(str(raw_state)).resolve()
+    if not state.is_file():
+        raise FileNotFoundError(state)
+    return state
 
 
 def make_ram_env(

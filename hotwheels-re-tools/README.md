@@ -117,6 +117,27 @@ at `0x080EC538`, then runs from the ROM's unused trailing zero padding at
 versioned marker used by the Gym wrappers. Keep every generated ROM ignored
 and uncommitted.
 
+## Native player-button opponents
+
+`patch-npc-buttons` is the symmetric self-play patch. In both race-manager
+setup paths it changes the requested population from one player plus three CPUs
+to four player-class racers plus zero CPUs. It also hooks player input
+preparation so vehicle index 0 continues sampling the real GBA keypad while
+indices 1–3 retain independent racer-local button transition masks supplied by
+Python.
+
+```bash
+PYTHONPATH=hotwheels-re-tools/src \
+  python3 -m hotwheels_re_tools patch-npc-buttons \
+  rom.gba /tmp/hotwheels-native-buttons.gba
+```
+
+The seven RAM-policy actions therefore have identical button semantics and run
+through identical native control/physics code for Player 1 and model opponents.
+A savestate created before this patch still restores stock CPU objects and
+cannot be used for native-button self-play; see
+[RAM_PLAYER.md](../RAM_PLAYER.md) for the private four-player state generator.
+
 ## Tests
 
 ```bash

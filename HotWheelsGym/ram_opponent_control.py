@@ -17,6 +17,9 @@ from .npc_control import (
     DEFAULT_MAX_TURN,
     HEADING_PERIOD,
     NPCCommand,
+    RACER_HELD_OFFSET,
+    RACER_PRESSED_OFFSET,
+    RACER_RELEASED_OFFSET,
     RACER_DESIRED_HEADING_OFFSET,
     RACER_TARGET_SPEED_OFFSET,
     RaceMemory,
@@ -25,12 +28,24 @@ from .npc_control import (
     progress_delta,
 )
 
-
 DINO_BONEYARD_PROGRESS_COUNT = 342
 DINO_POSITION_CENTER = 1 << 24
 DINO_POSITION_SCALE = 1 << 24
 RELATIVE_POSITION_SCALE = 1 << 23
 SPEED_DELTA_SCALE = 1 << 13
+
+GBA_BUTTON_BITS = {
+    "A": 0x001,
+    "B": 0x002,
+    "SELECT": 0x004,
+    "START": 0x008,
+    "RIGHT": 0x010,
+    "LEFT": 0x020,
+    "UP": 0x040,
+    "DOWN": 0x080,
+    "R": 0x100,
+    "L": 0x200,
+}
 
 
 @dataclass(frozen=True)
@@ -41,6 +56,15 @@ class RacerAction:
     buttons: tuple[str, ...]
     steering: int
     throttle: int
+
+
+@dataclass(frozen=True)
+class RacerButtonState:
+    """Native GBA transition masks written to a converted NPC racer."""
+
+    pressed: int
+    released: int
+    held: int
 
 
 RAM_ACTIONS = (
@@ -125,8 +149,44 @@ def player_buttons_from_action(
     selected = set(RAM_ACTIONS[_action_index(action)].buttons)
     missing = selected - set(button_names)
     if missing:
-        raise ValueError("environment is missing buttons: " + ", ".join(sorted(missing)))
+        raise ValueError(
+            "environment is missing buttons: " + ", ".join(sorted(missing))
+        )
     return tuple(name in selected for name in button_names)
+
+
+def gba_button_mask_from_action(action: object) -> int:
+    """Convert one shared action to the game's native 10-bit button mask."""
+
+    return sum(
+        GBA_BUTTON_BITS[name] for name in RAM_ACTIONS[_action_index(action)].buttons
+    )
+
+
+def write_racer_buttons(
+    race: RaceMemory,
+    slot: int,
+    action: object,
+    previous_held: int,
+) -> RacerButtonState:
+    """Give a converted NPC exactly the player-class button transition fields."""
+
+    racer = race.layout.opponent(slot)
+    if racer.kind != "player":
+        raise ValueError(
+            f"racer slot {slot} is {racer.kind}, not a button-controlled player class"
+        )
+    held = gba_button_mask_from_action(action)
+    previous_held &= 0x3FF
+    state = RacerButtonState(
+        pressed=held & ~previous_held,
+        released=previous_held & ~held,
+        held=held,
+    )
+    race.memory.assign(racer.address + RACER_PRESSED_OFFSET, "<u2", state.pressed)
+    race.memory.assign(racer.address + RACER_RELEASED_OFFSET, "<u2", state.released)
+    race.memory.assign(racer.address + RACER_HELD_OFFSET, "<u2", state.held)
+    return state
 
 
 def cpu_command_from_action(
@@ -143,9 +203,9 @@ def cpu_command_from_action(
     if not 0 < max_target_speed <= 0xFFFFFFFF:
         raise ValueError("max_target_speed must fit in an unsigned 32-bit value")
     selected = RAM_ACTIONS[_action_index(action)]
-    desired_heading = (
-        state.current_heading + selected.steering * max_turn
-    ) & (HEADING_PERIOD - 1)
+    desired_heading = (state.current_heading + selected.steering * max_turn) & (
+        HEADING_PERIOD - 1
+    )
     return NPCCommand(
         desired_heading=desired_heading,
         target_speed=selected.throttle * max_target_speed,
@@ -215,6 +275,11 @@ class RaceProgressTracker:
     def total_progress(self, slot: int, state: RacerState) -> int:
         return (self.laps[slot] - 1) * self.progress_count + state.progress
 
+    def current_lap(self, slot: int, state: RacerState) -> int:
+        """Return a one-based lap for wrapped or monotonic progress counters."""
+
+        return max(1, self.total_progress(slot, state) // self.progress_count + 1)
+
     def rank(self, slot: int, states: Mapping[int, RacerState]) -> int:
         own = self.total_progress(slot, states[slot])
         return 1 + sum(
@@ -278,14 +343,12 @@ def build_dino_ram_observation(
         round((state.progress / progress.progress_count) * HEADING_PERIOD)
     )
     lap_value = _clip(
-        (progress.laps[controlled_slot] - 1) / max(1, total_laps - 1),
+        (progress.current_lap(controlled_slot, state) - 1) / max(1, total_laps - 1),
         0.0,
         1.0,
     )
     rank_value = _clip((progress.rank(controlled_slot, states) - 1) / 3.0, 0.0, 1.0)
-    advance = progress_delta(
-        previous.progress, state.progress, progress.progress_count
-    )
+    advance = progress_delta(previous.progress, state.progress, progress.progress_count)
 
     features: list[float] = [
         *heading,
@@ -323,7 +386,10 @@ def build_dino_ram_observation(
                 _clip((other.speed - state.speed) / max_target_speed),
                 *relative_heading,
                 _clip(
-                    (progress.laps[other_slot] - progress.laps[controlled_slot])
+                    (
+                        progress.current_lap(other_slot, other)
+                        - progress.current_lap(controlled_slot, state)
+                    )
                     / max(1, total_laps)
                 ),
             )

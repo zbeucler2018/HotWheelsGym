@@ -1,5 +1,9 @@
 # Native NPC training and model opponents
 
+> This document describes the earlier low-level CPU heading/speed interface.
+> For the proven symmetric path—identical 43-float RAM observations and native
+> GBA button controls for Player 1 and opponents—use [RAM_PLAYER.md](RAM_PLAYER.md).
+
 HotWheelsGym can expose one or more of the game's native CPU racers to Python.
 The game still owns physics, collision, turning, animation, and race management;
 the policy supplies only a desired heading and target speed.

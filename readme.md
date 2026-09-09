@@ -43,17 +43,19 @@ env = HotWheelsGym.make("HWSTC-dino_boneyard-multi-3")
 
 ## Train native NPCs and race your models
 
-The repository includes an experimental `HotWheelsNPCEnv` that controls one
-of the game's native CPU racers through desired-heading and target-speed
-commands. `ModelOpponentEnv` uses the same interface to put trained policies in
-CPU slots while Player 1 remains keyboard/controller-driven.
+The repository includes native opponent control. The RAM self-play path patches
+the race manager to create four player-class racers, so model opponents receive
+the same 43-float ego-centric observation and the same seven discrete GBA button
+actions as Player 1. The game still owns physics, collisions, rendering, and
+race management.
 
-This requires a locally generated, selected-slot ROM patch; no ROM or generated
-ROM is committed. See [NPC_ENVIRONMENT.md](NPC_ENVIRONMENT.md) for the patch,
-training, and human-vs-model commands.
+This requires a locally generated ROM patch and fresh private start-line state;
+neither is committed. See [NPC_ENVIRONMENT.md](NPC_ENVIRONMENT.md) for the
+low-level research interface and [RAM_PLAYER.md](RAM_PLAYER.md) for the proven
+Player-1/self-play workflow.
 
 For the faster self-play path, the repository also has a separate Player 1
-RAM trainer. Its checkpoints can be placed into patched CPU slots as frozen
+RAM trainer. Its checkpoints can be placed into native-button opponent slots as frozen
 opponents while a newer Player 1 model trains against them. See
 [RAM_PLAYER.md](RAM_PLAYER.md). This code path does not import or modify the
 pixel trainer.

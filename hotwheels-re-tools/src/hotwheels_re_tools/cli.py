@@ -12,12 +12,17 @@ from .rom import (
     EXTERNAL_CPU_HEADING_PATCHES,
     EXPECTED_ROM_SHA1,
     MIRROR_CPU_PATCHES,
+    NPC_BUTTON_CONTROL_PATCH_VERSION,
+    NPC_CONTROL_PATCH_VERSION,
     Patch,
+    button_controlled_vehicle_indices,
     controlled_vehicle_indices,
     create_external_cpu_heading_rom,
     create_mirror_cpu_rom,
+    create_npc_button_control_rom,
     create_npc_control_rom,
     decode_thumb_bl,
+    npc_button_control_patches,
     npc_control_patches,
     validate_rom,
     validate_supported_rom,
@@ -44,7 +49,9 @@ def build_parser() -> argparse.ArgumentParser:
     state.add_argument("state", type=Path)
     state.add_argument("--json", action="store_true", help="emit machine-readable JSON")
 
-    disassemble = commands.add_parser("disassemble", help="disassemble a Thumb ROM range")
+    disassemble = commands.add_parser(
+        "disassemble", help="disassemble a Thumb ROM range"
+    )
     disassemble.add_argument("rom", type=Path)
     disassemble.add_argument("start", type=_integer)
     disassemble.add_argument("stop", type=_integer)
@@ -57,7 +64,9 @@ def build_parser() -> argparse.ArgumentParser:
     patch.add_argument("output", type=Path)
     patch.add_argument("--force", action="store_true")
     patch.add_argument(
-        "--dry-run", action="store_true", help="verify and display patches without writing"
+        "--dry-run",
+        action="store_true",
+        help="verify and display patches without writing",
     )
 
     heading_patch = commands.add_parser(
@@ -68,7 +77,9 @@ def build_parser() -> argparse.ArgumentParser:
     heading_patch.add_argument("output", type=Path)
     heading_patch.add_argument("--force", action="store_true")
     heading_patch.add_argument(
-        "--dry-run", action="store_true", help="verify and display patches without writing"
+        "--dry-run",
+        action="store_true",
+        help="verify and display patches without writing",
     )
 
     npc_patch = commands.add_parser(
@@ -84,9 +95,24 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="CPU vehicle index to control (1..3); repeat for multiple models",
     )
+
+    button_patch = commands.add_parser(
+        "patch-npc-buttons",
+        help="give all NPC racers independent native player button controls",
+    )
+    button_patch.add_argument("rom", type=Path)
+    button_patch.add_argument("output", type=Path)
+    button_patch.add_argument("--force", action="store_true")
+    button_patch.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="verify and display patches without writing",
+    )
     npc_patch.add_argument("--force", action="store_true")
     npc_patch.add_argument(
-        "--dry-run", action="store_true", help="verify and display patches without writing"
+        "--dry-run",
+        action="store_true",
+        help="verify and display patches without writing",
     )
 
     inspect_patch = commands.add_parser(
@@ -215,12 +241,30 @@ def main(argv: list[str] | None = None) -> None:
                 )
                 print(f"wrote {args.output} (sha1={digest}; vehicles={selected})")
                 print("keep this generated ROM ignored and uncommitted")
+        elif args.command == "patch-npc-buttons":
+            validate_rom(args.rom)
+            _print_patch_plan(npc_button_control_patches())
+            if args.dry_run:
+                print("dry run: ROM validated; no output written")
+            else:
+                digest = create_npc_button_control_rom(
+                    args.rom, args.output, force=args.force
+                )
+                print(f"wrote {args.output} (sha1={digest}; vehicles=1,2,3)")
+                print("keep this generated ROM ignored and uncommitted")
         elif args.command == "inspect-npc-control-rom":
             _, selected = validate_supported_rom(args.rom)
             if not selected:
                 raise ValueError("ROM does not contain the selected-NPC control patch")
+            button_controlled = button_controlled_vehicle_indices(args.rom.read_bytes())
+            patch_name = "native buttons" if button_controlled else "CPU command"
+            version = (
+                NPC_BUTTON_CONTROL_PATCH_VERSION
+                if button_controlled
+                else NPC_CONTROL_PATCH_VERSION
+            )
             print(
-                f"NPC control patch: version=1 vehicles="
+                f"NPC control patch: type={patch_name} version={version} vehicles="
                 + ",".join(str(index) for index in selected)
             )
     except (FileNotFoundError, OSError, ValueError) as error:
