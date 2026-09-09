@@ -31,6 +31,7 @@ from .common import (
     make_ram_env,
     prepare_rom,
     resolve_repo_path,
+    validate_model_observation_space,
 )
 from .media import RGBVideoWriter, log_video_replay
 from .record import record_model
@@ -120,6 +121,7 @@ def _evaluate_ram(
         seed=int(config["seed"]) + 20_000,
     )
     model = PPO.load(model_path, device=device)
+    validate_model_observation_space(model, model_path)
     rows: list[dict[str, Any]] = []
     try:
         for episode in range(episodes):

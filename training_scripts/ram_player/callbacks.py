@@ -21,6 +21,10 @@ class RAMEvaluation:
     mean_finish_frames: float
     mean_speed: float
     mean_rank: float
+    mean_abs_lateral_offset: float
+    mean_heading_alignment: float
+    wall_contact_rate: float
+    mean_respawns: float
     selection_score: float
 
 
@@ -42,6 +46,10 @@ def evaluate_ram_policy(
     finish_frames: list[float] = []
     mean_speeds: list[float] = []
     ranks: list[float] = []
+    lateral_offsets: list[float] = []
+    heading_alignments: list[float] = []
+    wall_contact_rates: list[float] = []
+    respawn_counts: list[float] = []
     scores: list[float] = []
 
     for _ in range(episodes):
@@ -50,6 +58,11 @@ def evaluate_ram_policy(
         episode_reward = 0.0
         episode_length = 0
         speeds: list[float] = []
+        lateral_total = 0.0
+        heading_total = 0.0
+        wall_frames = 0
+        observed_frames = 0
+        respawns = 0
         info: dict[str, Any] = {}
         while not (terminated or truncated):
             action, _ = model.predict(observation, deterministic=True)
@@ -57,6 +70,14 @@ def evaluate_ram_policy(
             episode_reward += float(reward)
             episode_length += 1
             speeds.append(float(info["ram_player_speed"]))
+            frames = int(info.get("ram_action_repeat_frames", 1))
+            observed_frames += frames
+            lateral_total += (
+                float(info["ram_decision_mean_abs_lateral_offset"]) * frames
+            )
+            heading_total += float(info["ram_decision_mean_heading_alignment"]) * frames
+            wall_frames += int(info["ram_decision_wall_frames"])
+            respawns += int(info["ram_decision_respawns"])
 
         finished = bool(info.get("ram_player_finished", False))
         completion = float(info.get("ram_player_completion", 0.0))
@@ -77,6 +98,10 @@ def evaluate_ram_policy(
             finish_frames.append(float(finish_frame))
         mean_speeds.append(fmean(speeds) if speeds else 0.0)
         ranks.append(float(info.get("ram_player_rank", 4)))
+        lateral_offsets.append(lateral_total / max(1, observed_frames))
+        heading_alignments.append(heading_total / max(1, observed_frames))
+        wall_contact_rates.append(wall_frames / max(1, observed_frames))
+        respawn_counts.append(float(respawns))
         scores.append(score)
 
     return RAMEvaluation(
@@ -87,6 +112,10 @@ def evaluate_ram_policy(
         mean_finish_frames=fmean(finish_frames) if finish_frames else 0.0,
         mean_speed=fmean(mean_speeds),
         mean_rank=fmean(ranks),
+        mean_abs_lateral_offset=fmean(lateral_offsets),
+        mean_heading_alignment=fmean(heading_alignments),
+        wall_contact_rate=fmean(wall_contact_rates),
+        mean_respawns=fmean(respawn_counts),
         selection_score=fmean(scores),
     )
 
@@ -129,6 +158,10 @@ class RAMEvalCallback(BaseCallback):
                         "mean_finish_frames",
                         "mean_speed",
                         "mean_rank",
+                        "mean_abs_lateral_offset",
+                        "mean_heading_alignment",
+                        "wall_contact_rate",
+                        "mean_respawns",
                         "selection_score",
                     )
                 )
@@ -148,6 +181,10 @@ class RAMEvalCallback(BaseCallback):
             "mean_finish_frames": result.mean_finish_frames,
             "mean_speed": result.mean_speed,
             "mean_rank": result.mean_rank,
+            "mean_abs_lateral_offset": result.mean_abs_lateral_offset,
+            "mean_heading_alignment": result.mean_heading_alignment,
+            "wall_contact_rate": result.wall_contact_rate,
+            "mean_respawns": result.mean_respawns,
             "selection_score": result.selection_score,
         }
         for name, value in values.items():
@@ -164,7 +201,9 @@ class RAMEvalCallback(BaseCallback):
                 f"finish={result.finish_rate:.0%} "
                 f"completion={result.mean_completion:.1%} "
                 f"finish_frames={result.mean_finish_frames:.1f} "
-                f"rank={result.mean_rank:.2f}"
+                f"rank={result.mean_rank:.2f} "
+                f"lateral={result.mean_abs_lateral_offset:.3f} "
+                f"wall={result.wall_contact_rate:.1%}"
             )
         if result.selection_score > self.best_score:
             self.best_score = result.selection_score

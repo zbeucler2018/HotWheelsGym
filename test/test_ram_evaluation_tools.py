@@ -2,17 +2,68 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import gymnasium as gym
 import numpy as np
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 from torch.utils.tensorboard import SummaryWriter
 
 from HotWheelsGym.RAMOpponent import _is_white_respawn_frame
-from training_scripts.ram_player.common import require_all_opponent_slots
+from training_scripts.ram_player.callbacks import evaluate_ram_policy
+from training_scripts.ram_player.common import (
+    require_all_opponent_slots,
+    validate_model_observation_space,
+)
 from training_scripts.ram_player.media import RGBVideoWriter, log_video_replay
 from training_scripts.ram_player.sweep import checkpoint_sort_key
 
 
 class RAMEvaluationToolTests(unittest.TestCase):
+    def test_evaluation_aggregates_track_quality_metrics(self):
+        class OneStepEnv(gym.Env):
+            observation_space = gym.spaces.Box(-1.0, 1.0, (54,), np.float32)
+            action_space = gym.spaces.Discrete(7)
+
+            def reset(self, *, seed=None, options=None):
+                return np.zeros(54, dtype=np.float32), {}
+
+            def step(self, action):
+                return (
+                    np.zeros(54, dtype=np.float32),
+                    1.0,
+                    False,
+                    True,
+                    {
+                        "ram_player_speed": 20_000,
+                        "ram_player_finished": False,
+                        "ram_player_completion": 0.25,
+                        "ram_player_rank": 3,
+                        "ram_action_repeat_frames": 4,
+                        "ram_decision_mean_abs_lateral_offset": 0.125,
+                        "ram_decision_mean_heading_alignment": 0.75,
+                        "ram_decision_wall_frames": 1,
+                        "ram_decision_respawns": 1,
+                    },
+                )
+
+        class CoastModel:
+            def predict(self, observation, deterministic=True):
+                return 0, None
+
+        result = evaluate_ram_policy(
+            CoastModel(), OneStepEnv(), 1, max_episode_frames=4
+        )
+        self.assertEqual(result.mean_abs_lateral_offset, 0.125)
+        self.assertEqual(result.mean_heading_alignment, 0.75)
+        self.assertEqual(result.wall_contact_rate, 0.25)
+        self.assertEqual(result.mean_respawns, 1.0)
+
+    def test_legacy_ram_checkpoint_gets_clear_observation_error(self):
+        class LegacyModel:
+            observation_space = type("Space", (), {"shape": (43,)})()
+
+        with self.assertRaisesRegex(ValueError, "legacy 43-input checkpoint"):
+            validate_model_observation_space(LegacyModel(), "old_model.zip")
+
     def test_white_respawn_frame_detection_rejects_normal_frames(self):
         normal = np.zeros((16, 16, 3), dtype=np.uint8)
         white = np.full((16, 16, 3), 255, dtype=np.uint8)

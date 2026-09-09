@@ -16,7 +16,12 @@ from stable_baselines3 import PPO
 from torch.utils.tensorboard import SummaryWriter
 
 from .callbacks import evaluate_ram_policy
-from .common import load_config, make_ram_env, prepare_rom
+from .common import (
+    load_config,
+    make_ram_env,
+    prepare_rom,
+    validate_model_observation_space,
+)
 from .media import log_video_replay
 from .record import record_model
 
@@ -141,6 +146,7 @@ def main() -> None:
     try:
         for steps, label, model_path in candidates:
             model = PPO.load(model_path, device=args.device)
+            validate_model_observation_space(model, model_path)
             result = evaluate_ram_policy(
                 model,
                 env,

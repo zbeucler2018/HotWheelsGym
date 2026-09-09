@@ -12,6 +12,12 @@ from math import cos, hypot, pi, sin
 from operator import index as integer_index
 from typing import Mapping
 
+from .dino_boneyard_track import (
+    DINO_TRACK_OBSERVATION_NAMES,
+    DINO_TRACK_OBSERVATION_SIZE,
+    DINO_TRACK_POINT_COUNT,
+    dino_track_pose,
+)
 from .npc_control import (
     DEFAULT_MAX_TARGET_SPEED,
     DEFAULT_MAX_TURN,
@@ -29,6 +35,7 @@ from .npc_control import (
 )
 
 DINO_BONEYARD_PROGRESS_COUNT = 342
+DINO_RAM_OBSERVATION_VERSION = 2
 DINO_POSITION_CENTER = 1 << 24
 DINO_POSITION_SCALE = 1 << 24
 RELATIVE_POSITION_SCALE = 1 << 23
@@ -46,6 +53,9 @@ GBA_BUTTON_BITS = {
     "R": 0x100,
     "L": 0x200,
 }
+
+if DINO_TRACK_POINT_COUNT != DINO_BONEYARD_PROGRESS_COUNT:
+    raise RuntimeError("Dino track reference and progress counts differ")
 
 
 @dataclass(frozen=True)
@@ -79,19 +89,23 @@ RAM_ACTIONS = (
 RAM_ACTION_SIZE = len(RAM_ACTIONS)
 
 SELF_OBSERVATION_NAMES = (
-    "self_heading_sin",
-    "self_heading_cos",
-    "self_x",
-    "self_z",
-    "self_speed",
-    "track_phase_sin",
-    "track_phase_cos",
-    "self_lap",
-    "self_rank",
-    "self_acceleration",
-    "self_turn_rate",
-    "self_progress_rate",
-) + tuple(f"previous_action_{action.name}" for action in RAM_ACTIONS)
+    (
+        "self_heading_sin",
+        "self_heading_cos",
+        "self_x",
+        "self_z",
+        "self_speed",
+        "track_phase_sin",
+        "track_phase_cos",
+        "self_lap",
+        "self_rank",
+        "self_acceleration",
+        "self_turn_rate",
+        "self_progress_rate",
+    )
+    + DINO_TRACK_OBSERVATION_NAMES
+    + tuple(f"previous_action_{action.name}" for action in RAM_ACTIONS)
+)
 
 OTHER_OBSERVATION_NAMES = (
     "forward",
@@ -110,7 +124,7 @@ RAM_OBSERVATION_NAMES = SELF_OBSERVATION_NAMES + tuple(
     for name in OTHER_OBSERVATION_NAMES
 )
 
-SELF_OBSERVATION_SIZE = 12 + RAM_ACTION_SIZE
+SELF_OBSERVATION_SIZE = 12 + DINO_TRACK_OBSERVATION_SIZE + RAM_ACTION_SIZE
 OTHER_OBSERVATION_SIZE = 8
 DINO_RAM_OBSERVATION_SIZE = SELF_OBSERVATION_SIZE + 3 * OTHER_OBSERVATION_SIZE
 
@@ -349,6 +363,7 @@ def build_dino_ram_observation(
     )
     rank_value = _clip((progress.rank(controlled_slot, states) - 1) / 3.0, 0.0, 1.0)
     advance = progress_delta(previous.progress, state.progress, progress.progress_count)
+    track = dino_track_pose(state)
 
     features: list[float] = [
         *heading,
@@ -361,6 +376,7 @@ def build_dino_ram_observation(
         _clip((state.speed - previous.speed) / SPEED_DELTA_SCALE),
         _clip(heading_delta(state.current_heading, previous.current_heading) / 0x200),
         _clip(advance / 4.0),
+        *track.features,
         *(1.0 if index == action_index else 0.0 for index in range(RAM_ACTION_SIZE)),
     ]
 
@@ -412,14 +428,24 @@ def race_reward(
     current_rank: int,
     completed_laps: int = 0,
     finished_now: bool = False,
+    hit_wall: bool = False,
+    lateral_offset: float = 0.0,
+    heading_alignment: float = 1.0,
+    respawned_now: bool = False,
 ) -> float:
-    """Progress-dominant reward with pressure toward quick race completion."""
+    """Progress-dominant reward with modest road-following safety shaping."""
 
     speed_ratio = _clip(speed / max(1, max_target_speed), 0.0, 1.0)
+    lateral_penalty = 0.003 * abs(_clip(lateral_offset))
+    heading_penalty = 0.002 * (1.0 - _clip(heading_alignment)) / 2.0
     return float(
         advance
         + 0.002 * speed_ratio
         - 0.005
+        - lateral_penalty
+        - heading_penalty
+        - (0.05 if hit_wall else 0.0)
+        - (2.0 if respawned_now else 0.0)
         + 0.25 * (previous_rank - current_rank)
         + 5.0 * completed_laps
         + (50.0 if finished_now else 0.0)

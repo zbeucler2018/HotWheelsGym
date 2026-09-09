@@ -61,7 +61,8 @@ Each timestamped run contains:
 
 Evaluation runs at startup, every 250,000 timesteps, and at shutdown. It uses a
 separate deterministic start-line race and records completion, finish rate,
-raw finish frames, mean speed, and rank.
+raw finish frames, mean speed, rank, centerline error, heading alignment,
+wall-contact rate, and respawn count.
 
 After the environments close, the trainer automatically records one
 deterministic start-line race using `evaluation/best_model.zip`. The MP4 plays
@@ -87,15 +88,35 @@ CSV/JSON report remain in the sweep directory.
 
 ## Observation and action contract
 
-Every controlled racer—Player 1 or an opponent—gets the same 43 normalized
+Every controlled racer—Player 1 or an opponent—gets the same 54 normalized
 floats, rotated so that racer is always the observation's ego:
 
 - heading sine/cosine, absolute Dino X/Z, speed, and checkpoint phase;
 - tracked lap and race rank;
 - acceleration, turn rate, and progress rate;
+- signed centerline offset and heading error relative to the road;
+- ego-relative directions to short, medium, and long lookahead points;
+- medium- and long-range signed track curvature;
 - a seven-value one-hot encoding of the previous action;
 - for the three nearest racers: ego-frame forward/right/distance, relative
   total progress, speed, heading sine/cosine, and relative lap.
+
+The Dino reference line contains one X/Z point per modulo-342 progress unit. It
+was derived from median native-racer telemetry over repeated laps; no ROM bytes
+or images are stored. Each live racer is projected onto nearby reference-line
+segments, so Player 1 and every model opponent get the same local geometry even
+when they occupy different parts of the track.
+
+This is observation contract version 2. The previous 43-input checkpoints are
+intentionally incompatible: their neural-network input layer cannot accept the
+new road features. The tools detect those checkpoints and report a clear error
+instead of silently feeding a mismatched observation. Train the first v2 model
+from scratch; subsequent v2 checkpoints can be used symmetrically for self-play.
+
+The reward remains progress-dominant and finish-aware. Small shaping penalties
+now discourage wall contact, large centerline error, wrong-way alignment, and a
+new Player 1 respawn. Evaluation logs mean lateral error, heading alignment,
+wall-contact rate, and respawns alongside finish time, completion, and rank.
 
 There are seven discrete actions:
 
@@ -114,6 +135,24 @@ Player 1 continues sampling the hardware keypad; slots 1–3 instead retain the
 independent pressed/released/held masks written by Python. This means steering,
 braking, boost, physics, collisions, and lap handling all use the exact same
 game code for Player 1 and model opponents.
+
+### What the local ROM patch changes
+
+`prepare_rom()` never edits the supplied `rom.gba` in place. When model
+opponents are requested, it copies the source into the ignored run-private
+directory and applies three narrowly scoped changes to that copy:
+
+1. both race-manager construction paths create four player-class racers and
+   zero CPU-class racers;
+2. the Player input-preparation call is redirected through a small Thumb hook;
+3. vehicle index 0 tail-calls the original hardware-keypad routine, while
+   indices 1–3 return without overwriting their racer-local button fields.
+
+Python writes each model action as the same pressed/released/held GBA masks at
+racer offsets `+0x302`, `+0x304`, and `+0x306`. From there, the original player
+update, physics, collisions, tricks, lap logic, and rendering run normally. A
+marker and expected SHA-1 identify the generated patch. The original and
+generated ROMs are ignored by Git and must never be committed.
 
 ## Self-play against prior Player 1 models
 

@@ -19,6 +19,7 @@ from .common import (
     opponent_state_path,
     prepare_rom,
     require_all_opponent_slots,
+    validate_model_observation_space,
 )
 from .media import RGBVideoWriter
 
@@ -50,6 +51,7 @@ def record_model(
         state_path=(str(opponent_state_path(config)) if opponent_paths else None),
     )
     model = PPO.load(model_path, device=device)
+    validate_model_observation_space(model, model_path)
     observation, info = env.reset(seed=int(config["seed"]) + 30_000)
     encoder = RGBVideoWriter(video_path, env.render(), fps=60 / frame_skip)
     terminated = truncated = False
@@ -78,6 +80,8 @@ def record_model(
         "finished": bool(info.get("ram_player_finished", False)),
         "completion": float(info.get("ram_player_completion", 0.0)),
         "rank": int(info.get("ram_player_rank", 4)),
+        "lateral_offset": float(info.get("ram_player_lateral_offset", 0.0)),
+        "heading_alignment": float(info.get("ram_player_heading_alignment", 0.0)),
     }
     if opponent_paths:
         result["masked_opponent_respawn_flash_frames"] = int(
@@ -90,6 +94,12 @@ def record_model(
                 "completion": float(info.get(f"ram_npc_{slot}_completion", 0.0)),
                 "lap": int(info.get(f"ram_npc_{slot}_lap", 1)),
                 "rank": int(info.get(f"ram_npc_{slot}_rank", 4)),
+                "lateral_offset": float(
+                    info.get(f"ram_npc_{slot}_lateral_offset", 0.0)
+                ),
+                "heading_alignment": float(
+                    info.get(f"ram_npc_{slot}_heading_alignment", 0.0)
+                ),
                 "speed": int(info.get(f"ram_npc_{slot}_speed", 0)),
                 "action": int(info.get(f"ram_npc_{slot}_action", 0)),
             }

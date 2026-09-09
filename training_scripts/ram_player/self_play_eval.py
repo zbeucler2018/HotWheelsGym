@@ -112,6 +112,8 @@ def main() -> None:
             ),
             "completion": float(result["completion"]),
             "rank": float(result["rank"]),
+            "final_abs_lateral_offset": abs(float(result["lateral_offset"])),
+            "final_heading_alignment": float(result["heading_alignment"]),
         }
         for name, value in player_metrics.items():
             writer.add_scalar(f"self_play/player/{name}", value, 0)
@@ -130,6 +132,10 @@ def main() -> None:
                 ),
                 "completion": float(opponent["completion"]),
                 "rank": float(opponent["rank"]),
+                "final_abs_lateral_offset": abs(
+                    float(opponent["lateral_offset"])
+                ),
+                "final_heading_alignment": float(opponent["heading_alignment"]),
             }
             for name, value in opponent_metrics.items():
                 writer.add_scalar(f"self_play/npc_{slot}/{name}", value, 0)

@@ -1,4 +1,4 @@
-run_name: dino_ram_player_v1
+run_name: dino_ram_player_track_v2
 
 # Three emulator workers leave one N150 core available for PPO updates.
 total_timesteps: 5000000

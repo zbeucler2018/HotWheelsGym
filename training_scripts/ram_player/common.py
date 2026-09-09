@@ -23,7 +23,12 @@ from HotWheelsGym.npc_control import (
     button_controlled_vehicle_indices_from_rom,
     controlled_vehicle_indices_from_rom,
 )
-from HotWheelsGym.ram_opponent_control import RAM_ACTIONS, RAM_OBSERVATION_NAMES
+from HotWheelsGym.ram_opponent_control import (
+    DINO_RAM_OBSERVATION_SIZE,
+    DINO_RAM_OBSERVATION_VERSION,
+    RAM_ACTIONS,
+    RAM_OBSERVATION_NAMES,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = Path(__file__).with_name("dino_boneyard.yml")
@@ -136,6 +141,24 @@ def require_all_opponent_slots(opponents: Mapping[int, Any]) -> None:
         )
 
 
+def validate_model_observation_space(model: Any, path: str | Path) -> None:
+    """Reject legacy 43-input checkpoints with a useful migration message."""
+
+    shape = tuple(getattr(model.observation_space, "shape", ()) or ())
+    expected = (DINO_RAM_OBSERVATION_SIZE,)
+    if shape != expected:
+        legacy_note = (
+            " This appears to be a legacy 43-input checkpoint; observation v2 "
+            "adds Dino Boneyard centerline cues and must be trained from scratch."
+            if shape == (43,)
+            else ""
+        )
+        raise ValueError(
+            f"RAM model {path} expects observation shape {shape}, but the active "
+            f"contract is {expected}.{legacy_note}"
+        )
+
+
 def prepare_rom(
     source_rom: Path, opponent_slots: tuple[int, ...], private_dir: Path
 ) -> Path:
@@ -237,10 +260,11 @@ def make_ram_env(
         base.unwrapped.statename = str(state)
     env: gym.Env = base
     if opponent_paths:
-        models = {
-            int(slot): PPO.load(path, device="cpu")
-            for slot, path in opponent_paths.items()
-        }
+        models = {}
+        for slot, path in opponent_paths.items():
+            model = PPO.load(path, device="cpu")
+            validate_model_observation_space(model, path)
+            models[int(slot)] = model
         env = DinoRAMModelOpponentEnv(
             env,
             models,
@@ -288,6 +312,7 @@ def write_run_metadata(
         "source_rom_sha1": file_sha1(source_rom),
         "active_rom_sha1": file_sha1(active_rom),
         "active_rom_path": str(active_rom.resolve()),
+        "observation_version": DINO_RAM_OBSERVATION_VERSION,
         "observation_names": RAM_OBSERVATION_NAMES,
         "actions": [
             {"index": index, "name": action.name, "buttons": action.buttons}

@@ -5,6 +5,7 @@ import struct
 import sys
 import types
 import unittest
+from dataclasses import replace
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_NAME = "hotwheels_ram_test_package"
@@ -26,6 +27,7 @@ def load_module(name: str, filename: str):
 
 npc = load_module("npc_control", "npc_control.py")
 ram = load_module("ram_opponent_control", "ram_opponent_control.py")
+track = sys.modules[f"{PACKAGE_NAME}.dino_boneyard_track"]
 
 
 class FakeMemory:
@@ -73,8 +75,45 @@ class RAMPlayerControlTests(unittest.TestCase):
                     states, states, tracker, slot, 1
                 )
                 self.assertEqual(len(observation), ram.DINO_RAM_OBSERVATION_SIZE)
+                self.assertEqual(ram.DINO_RAM_OBSERVATION_SIZE, 54)
                 self.assertEqual(len(observation), len(ram.RAM_OBSERVATION_NAMES))
                 self.assertTrue(all(-1.0 <= value <= 1.0 for value in observation))
+
+    def test_centerline_pose_is_zero_offset_at_reference_point(self):
+        race = npc.RaceMemory(state_memory(self.state_path))
+        state = race.state(0)
+        index = 100
+        x, z = track.DINO_BONEYARD_CENTERLINE[index]
+        pose = ram.dino_track_pose(replace(state, progress=index, x=x, z=z))
+
+        self.assertEqual(len(pose.features), 11)
+        self.assertAlmostEqual(pose.lateral_offset, 0.0, places=6)
+        self.assertTrue(all(-1.0 <= value <= 1.0 for value in pose.features))
+
+    def test_track_observation_names_are_part_of_shared_contract(self):
+        expected = {
+            "track_lateral_offset",
+            "track_heading_error_sin",
+            "track_heading_error_cos",
+            "track_target_short_forward",
+            "track_target_long_right",
+            "track_curvature_long",
+        }
+        self.assertTrue(expected.issubset(set(ram.RAM_OBSERVATION_NAMES)))
+        self.assertEqual(ram.DINO_RAM_OBSERVATION_VERSION, 2)
+
+    def test_track_features_cover_every_configured_training_state(self):
+        states_dir = ROOT / "training_scripts" / "data" / "states"
+        for suffix in ("71", "180", "290"):
+            race = npc.RaceMemory(
+                state_memory(states_dir / f"dino_boneyard_multi_{suffix}.state")
+            )
+            for slot in (0, 1, 2, 3):
+                with self.subTest(state=suffix, slot=slot):
+                    pose = ram.dino_track_pose(race.state(slot))
+                    self.assertTrue(
+                        all(-1.0 <= value <= 1.0 for value in pose.features)
+                    )
 
     def test_player_action_maps_to_accelerate_and_left_buttons(self):
         buttons = ("B", "A", "LEFT", "RIGHT", "L", "R", "UP")
@@ -211,6 +250,27 @@ class RAMPlayerControlTests(unittest.TestCase):
             finished_now=True,
         )
         self.assertGreater(finished, partial + 50)
+
+    def test_reward_penalizes_wall_contact_bad_alignment_and_respawn(self):
+        safe = ram.race_reward(
+            0,
+            30_000,
+            73_728,
+            previous_rank=2,
+            current_rank=2,
+        )
+        unsafe = ram.race_reward(
+            0,
+            30_000,
+            73_728,
+            previous_rank=2,
+            current_rank=2,
+            hit_wall=True,
+            lateral_offset=1.0,
+            heading_alignment=-1.0,
+            respawned_now=True,
+        )
+        self.assertAlmostEqual(safe - unsafe, 2.055, places=6)
 
 
 if __name__ == "__main__":

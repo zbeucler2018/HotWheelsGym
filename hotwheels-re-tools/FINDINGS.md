@@ -1,9 +1,9 @@
 # Reverse-engineering findings
 
-Status: static, savestate, and headless mGBA analysis reproduced on 2026-09-07.
-The desired-heading command boundary and selected-CPU hook have been dynamically
-validated. The larger CPU-to-player-class mirror patch has not yet been run
-from a cold race start.
+Status: static, savestate, and headless mGBA analysis reproduced beginning on
+2026-09-07. The desired-heading boundary, selected-CPU hook, and symmetric
+native-button opponent path have been dynamically validated. The older
+mirror-control experiment remains separate from the production-facing patch.
 
 ## ROM identity
 
@@ -81,6 +81,38 @@ fields `+0x4`, `+0x6`, and `+0x2` to racer `+0x302`, `+0x304`, and `+0x306`.
 The alternate branch obtains a mask from a 14-byte indexed record and derives
 the same transitions. This is a player/link-racer control path; stock CPU
 objects are smaller and use a different vtable.
+
+## Symmetric native-button opponent patch
+
+`patch-npc-buttons` makes a private patched ROM copy; it never edits the source
+ROM in place. At both race-manager construction paths it changes the counts to
+four player/link racers and zero CPU racers. It then redirects the call at
+`0x08103EAE` through a Thumb hook at `0x0879BEE0`:
+
+- vehicle index 0 tail-calls the original `0x081025D4` input preparation, so
+  Player 1 still reads the hardware keypad;
+- vehicle indices 1–3 return immediately, preserving independent external
+  writes to `+0x302/+0x304/+0x306`.
+
+The emulator-side wrapper converts each of the same seven policy actions used
+by Player 1 into native 10-bit GBA pressed/released/held masks and writes them
+to those three racer-local fields every frame. All four vehicles then pass
+through the same player-class update and native physics. Generated copies carry
+the `HWBT` version-3 marker and expected SHA-1
+`e88db49ffc5ce3464d1ea5d941971e1ffe54c01a`; ROM files remain ignored.
+
+## Dino Boneyard track-relative RAM contract
+
+Observation version 2 adds a 342-point reference line derived from median X/Z
+telemetry for all three stock CPU racers over repeated laps. Live racers are
+projected onto nearby segments. The shared 54-float Player/NPC observation now
+includes signed lateral offset, heading error, three ego-relative lookahead
+directions, and medium/long signed curvature.
+
+A 12,000-frame native-racer replay produced a median normalized lateral error
+of 0.0023 (95th percentile 0.112), mean heading alignment of 0.938, and a local
+projection within two progress units for 95% of 35,974 racer-frame samples.
+The reference table stores only coordinates—no ROM bytes or imagery.
 
 ## Stock CPU command boundary
 
