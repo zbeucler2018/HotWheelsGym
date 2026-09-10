@@ -269,6 +269,14 @@ class RAMPlayerControlTests(unittest.TestCase):
         self.assertEqual(tracker.current_lap(0, state), 3)
         self.assertAlmostEqual(tracker.completion(0, state, 3), 700 / 1026)
 
+    def test_lap_split_tracker_records_each_raw_frame_interval(self):
+        timing = ram.LapSplitTracker.start(current_lap=1, total_laps=3)
+        timing.update(current_lap=2, raw_frame=5300)
+        timing.update(current_lap=3, raw_frame=10400)
+        timing.update(current_lap=3, raw_frame=15300, finished_now=True)
+
+        self.assertEqual(timing.padded_splits(), (5300, 5100, 4900))
+
     def test_finished_race_reward_beats_partial_progress(self):
         partial = ram.race_reward(1, 60_000, 73_728, previous_rank=2, current_rank=1)
         finished = ram.race_reward(

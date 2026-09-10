@@ -26,6 +26,7 @@ from .ram_opponent_control import (
     BOOST_ACTION_INDEX,
     DINO_BONEYARD_PROGRESS_COUNT,
     DINO_RAM_OBSERVATION_SIZE,
+    LapSplitTracker,
     RAM_ACTION_SIZE,
     RaceProgressTracker,
     RacerButtonState,
@@ -135,6 +136,13 @@ def _state_info(
     }
 
 
+def _lap_split_info(prefix: str, timing: LapSplitTracker) -> dict[str, int]:
+    return {
+        f"{prefix}lap_{lap}_frames": frames
+        for lap, frames in enumerate(timing.padded_splits(), start=1)
+    }
+
+
 class DinoRAMPlayerEnv(gym.Wrapper):
     """Train Player 1 from racer-centric RAM instead of framebuffer pixels."""
 
@@ -149,6 +157,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         self._raw_frame = 0
         self._finished = False
         self._finish_frame: int | None = None
+        self._lap_timing: LapSplitTracker | None = None
         self._player_respawn_pending = False
         self.action_space = gym.spaces.Discrete(RAM_ACTION_SIZE)
         self.observation_space = gym.spaces.Box(
@@ -191,6 +200,10 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         self._raw_frame = 0
         self._finished = False
         self._finish_frame = None
+        total_laps = int(_bare_env(self.env).total_laps)
+        self._lap_timing = LapSplitTracker.start(
+            self.progress_tracker.current_lap(0, self._states[0]), total_laps
+        )
         self._player_respawn_pending = self._race.respawn_pending(0)
         info.update(
             _state_info(
@@ -198,11 +211,12 @@ class DinoRAMPlayerEnv(gym.Wrapper):
                 0,
                 self._states,
                 self.progress_tracker,
-                int(_bare_env(self.env).total_laps),
+                total_laps,
                 finished=False,
                 finish_frame=None,
             )
         )
+        info.update(_lap_split_info("ram_player_", self._lap_timing))
         track = dino_track_pose(self._states[0])
         info["ram_player_track_index"] = track.progress_index
         info["ram_player_lateral_offset"] = track.lateral_offset
@@ -247,12 +261,18 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         if finished_now:
             self._finished = True
             self._finish_frame = self._raw_frame
+        if self._lap_timing is None:
+            raise RuntimeError("call reset() before tracking lap splits")
+        self._lap_timing.update(
+            current_lap, self._raw_frame, finished_now=finished_now
+        )
 
         advance = progress_delta(
             previous.progress,
             current.progress,
             DINO_BONEYARD_PROGRESS_COUNT,
         )
+        info.update(_lap_split_info("ram_player_", self._lap_timing))
         track = dino_track_pose(current)
         player_respawn_pending = self._race.respawn_pending(0)
         respawned_now = player_respawn_pending and not self._player_respawn_pending
@@ -390,6 +410,7 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         self._frames_until_action: dict[int, int] = {}
         self._finished: dict[int, bool] = {}
         self._finish_frames: dict[int, int | None] = {}
+        self._lap_timings: dict[int, LapSplitTracker] = {}
         self._button_masks: dict[int, int] = {}
         self._control_mode: str | None = None
         self._raw_frame = 0
@@ -447,6 +468,12 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         self._masking_opponent_respawn = False
         self._masked_respawn_frames = 0
         total_laps = int(_bare_env(self.env).total_laps)
+        self._lap_timings = {
+            slot: LapSplitTracker.start(
+                self._progress.current_lap(slot, self._states[slot]), total_laps
+            )
+            for slot in slots
+        }
         for slot in slots:
             info.update(
                 _state_info(
@@ -458,6 +485,9 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
                     finished=False,
                     finish_frame=None,
                 )
+            )
+            info.update(
+                _lap_split_info(f"ram_npc_{slot}_", self._lap_timings[slot])
             )
             info[f"ram_npc_{slot}_boost_delta"] = 0
             info[f"ram_npc_{slot}_boost_spent"] = 0
@@ -550,12 +580,18 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         info["ram_opponent_respawn_pending_slots"] = opponent_respawn_slots
 
         for slot, command in commands.items():
-            if (
+            finished_now = bool(
                 not self._finished[slot]
                 and self._progress.current_lap(slot, current_states[slot]) > total_laps
-            ):
+            )
+            if finished_now:
                 self._finished[slot] = True
                 self._finish_frames[slot] = self._raw_frame
+            self._lap_timings[slot].update(
+                self._progress.current_lap(slot, current_states[slot]),
+                self._raw_frame,
+                finished_now=finished_now,
+            )
             prefix = f"ram_npc_{slot}_"
             track = dino_track_pose(current_states[slot])
             info.update(
@@ -569,6 +605,7 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
                     finish_frame=self._finish_frames[slot],
                 )
             )
+            info.update(_lap_split_info(prefix, self._lap_timings[slot]))
             info[f"{prefix}action"] = self._actions[slot]
             info[f"{prefix}track_index"] = track.progress_index
             info[f"{prefix}lateral_offset"] = track.lateral_offset

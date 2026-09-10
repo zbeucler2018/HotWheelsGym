@@ -43,6 +43,9 @@ MONITOR_INFO_KEYS = (
     "ram_player_rank",
     "ram_player_speed",
     "ram_player_boost",
+    "ram_player_lap_1_frames",
+    "ram_player_lap_2_frames",
+    "ram_player_lap_3_frames",
 )
 
 

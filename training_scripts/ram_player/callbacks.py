@@ -29,6 +29,9 @@ class RAMEvaluation:
     mean_boost_spent: float
     mean_boost_gained: float
     boost_active_rate: float
+    mean_lap_1_seconds: float
+    mean_lap_2_seconds: float
+    mean_lap_3_seconds: float
     selection_score: float
 
 
@@ -58,6 +61,7 @@ def evaluate_ram_policy(
     boost_spent_totals: list[float] = []
     boost_gained_totals: list[float] = []
     boost_active_rates: list[float] = []
+    lap_splits: dict[int, list[float]] = {lap: [] for lap in (1, 2, 3)}
     scores: list[float] = []
 
     for _ in range(episodes):
@@ -124,6 +128,10 @@ def evaluate_ram_policy(
         boost_spent_totals.append(float(boost_spent))
         boost_gained_totals.append(float(boost_gained))
         boost_active_rates.append(boost_frames / max(1, observed_frames))
+        for lap in lap_splits:
+            split_frames = int(info.get(f"ram_player_lap_{lap}_frames", 0))
+            if split_frames > 0:
+                lap_splits[lap].append(split_frames / 60.0)
         scores.append(score)
 
     return RAMEvaluation(
@@ -142,6 +150,9 @@ def evaluate_ram_policy(
         mean_boost_spent=fmean(boost_spent_totals),
         mean_boost_gained=fmean(boost_gained_totals),
         boost_active_rate=fmean(boost_active_rates),
+        mean_lap_1_seconds=fmean(lap_splits[1]) if lap_splits[1] else 0.0,
+        mean_lap_2_seconds=fmean(lap_splits[2]) if lap_splits[2] else 0.0,
+        mean_lap_3_seconds=fmean(lap_splits[3]) if lap_splits[3] else 0.0,
         selection_score=fmean(scores),
     )
 
@@ -192,6 +203,9 @@ class RAMEvalCallback(BaseCallback):
                         "mean_boost_spent",
                         "mean_boost_gained",
                         "boost_active_rate",
+                        "mean_lap_1_seconds",
+                        "mean_lap_2_seconds",
+                        "mean_lap_3_seconds",
                         "selection_score",
                     )
                 )
@@ -219,6 +233,9 @@ class RAMEvalCallback(BaseCallback):
             "mean_boost_spent": result.mean_boost_spent,
             "mean_boost_gained": result.mean_boost_gained,
             "boost_active_rate": result.boost_active_rate,
+            "mean_lap_1_seconds": result.mean_lap_1_seconds,
+            "mean_lap_2_seconds": result.mean_lap_2_seconds,
+            "mean_lap_3_seconds": result.mean_lap_3_seconds,
             "selection_score": result.selection_score,
         }
         for name, value in values.items():
@@ -238,7 +255,10 @@ class RAMEvalCallback(BaseCallback):
                 f"rank={result.mean_rank:.2f} "
                 f"lateral={result.mean_abs_lateral_offset:.3f} "
                 f"wall={result.wall_contact_rate:.1%} "
-                f"boost_spent={result.mean_boost_spent:.0f}"
+                f"boost_spent={result.mean_boost_spent:.0f} "
+                f"laps={result.mean_lap_1_seconds:.2f}/"
+                f"{result.mean_lap_2_seconds:.2f}/"
+                f"{result.mean_lap_3_seconds:.2f}s"
             )
         if result.selection_score > self.best_score:
             self.best_score = result.selection_score

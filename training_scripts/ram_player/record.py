@@ -99,6 +99,14 @@ def record_model(
         "boost_gained": boost_gained,
         "boost_active_frames": boost_active_frames,
         "boost_active_rate": boost_active_frames / max(1, observed_frames),
+        "lap_split_frames": [
+            int(info.get(f"ram_player_lap_{lap}_frames", 0))
+            for lap in (1, 2, 3)
+        ],
+        "lap_split_seconds": [
+            int(info.get(f"ram_player_lap_{lap}_frames", 0)) / 60.0
+            for lap in (1, 2, 3)
+        ],
         "lateral_offset": float(info.get("ram_player_lateral_offset", 0.0)),
         "heading_alignment": float(info.get("ram_player_heading_alignment", 0.0)),
     }
@@ -121,6 +129,10 @@ def record_model(
                 ),
                 "speed": int(info.get(f"ram_npc_{slot}_speed", 0)),
                 "boost": int(info.get(f"ram_npc_{slot}_boost", 0)),
+                "lap_split_frames": [
+                    int(info.get(f"ram_npc_{slot}_lap_{lap}_frames", 0))
+                    for lap in (1, 2, 3)
+                ],
                 "action": int(info.get(f"ram_npc_{slot}_action", 0)),
             }
             for slot in sorted(opponent_paths)

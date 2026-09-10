@@ -64,13 +64,16 @@ separate deterministic start-line race and records completion, finish rate,
 raw finish frames, mean speed, rank, centerline error, heading alignment,
 wall-contact rate, respawn count, mean boost charge, boost gained/spent, and
 the fraction of emulator frames on which boost was requested while charge was
-available.
+available. Completed-lap times appear as `mean_lap_1_seconds`,
+`mean_lap_2_seconds`, and `mean_lap_3_seconds` in TensorBoard and the evaluation
+CSV.
 
 After the environments close, the trainer automatically records one
 deterministic start-line race using `evaluation/best_model.zip`. The MP4 plays
 at real-time speed (15 encoded frames per second for four-frame action repeat).
 Its JSON sidecar records final/mean boost charge, charge gained/spent, and boost
-active frames in addition to race outcome and track-quality metrics.
+active frames in addition to exact lap-split frames/seconds, race outcome, and
+track-quality metrics.
 Pass `--no-record-video` only when this final recording is not wanted.
 
 ## Re-evaluate a completed run

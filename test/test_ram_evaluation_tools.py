@@ -44,6 +44,9 @@ class RAMEvaluationToolTests(unittest.TestCase):
                         "ram_decision_boost_spent": 8,
                         "ram_decision_boost_gained": 16,
                         "ram_decision_boost_frames": 1,
+                        "ram_player_lap_1_frames": 4800,
+                        "ram_player_lap_2_frames": 4500,
+                        "ram_player_lap_3_frames": 4200,
                     },
                 )
 
@@ -62,6 +65,9 @@ class RAMEvaluationToolTests(unittest.TestCase):
         self.assertEqual(result.mean_boost_spent, 8.0)
         self.assertEqual(result.mean_boost_gained, 16.0)
         self.assertEqual(result.boost_active_rate, 0.25)
+        self.assertEqual(result.mean_lap_1_seconds, 80.0)
+        self.assertEqual(result.mean_lap_2_seconds, 75.0)
+        self.assertEqual(result.mean_lap_3_seconds, 70.0)
 
     def test_legacy_ram_checkpoint_gets_clear_observation_error(self):
         class LegacyModel:

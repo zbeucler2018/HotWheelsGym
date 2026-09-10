@@ -313,6 +313,41 @@ class RaceProgressTracker:
         return _clip(self.total_progress(slot, state) / denominator, 0.0, 1.0)
 
 
+@dataclass
+class LapSplitTracker:
+    """Measure completed laps in raw emulator frames."""
+
+    total_laps: int
+    completed_laps: int
+    last_crossing_frame: int
+    split_frames: list[int]
+
+    @classmethod
+    def start(cls, current_lap: int, total_laps: int) -> "LapSplitTracker":
+        if total_laps < 1:
+            raise ValueError("total_laps must be positive")
+        completed = max(0, min(total_laps, current_lap - 1))
+        return cls(total_laps, completed, 0, [0] * completed)
+
+    def update(
+        self, current_lap: int, raw_frame: int, *, finished_now: bool = False
+    ) -> None:
+        if raw_frame < self.last_crossing_frame:
+            raise ValueError("raw_frame cannot move backward")
+        target = max(0, min(self.total_laps, current_lap - 1))
+        if finished_now:
+            target = self.total_laps
+        while self.completed_laps < target:
+            self.split_frames.append(raw_frame - self.last_crossing_frame)
+            self.last_crossing_frame = raw_frame
+            self.completed_laps += 1
+
+    def padded_splits(self) -> tuple[int, ...]:
+        return tuple(self.split_frames) + (0,) * (
+            self.total_laps - len(self.split_frames)
+        )
+
+
 def read_racer_states(race: RaceMemory) -> dict[int, RacerState]:
     return {racer.slot: race.state(racer.slot) for racer in race.layout.racers}
 
