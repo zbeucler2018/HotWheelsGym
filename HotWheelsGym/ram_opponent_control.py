@@ -78,6 +78,16 @@ class RacerButtonState:
     held: int
 
 
+@dataclass(frozen=True)
+class BoostTelemetry:
+    """One racer boost-meter transition, excluding non-boost charge loss."""
+
+    delta: int
+    spent: int
+    gained: int
+    active: bool
+
+
 RAM_ACTIONS = (
     RacerAction("coast", (), 0, 0),
     RacerAction("accelerate", ("A",), 0, 1),
@@ -180,6 +190,22 @@ def gba_button_mask_from_action(action: object) -> int:
 
     return sum(
         GBA_BUTTON_BITS[name] for name in RAM_ACTIONS[_action_index(action)].buttons
+    )
+
+
+def boost_telemetry(
+    previous_charge: int, current_charge: int, action: object
+) -> BoostTelemetry:
+    """Describe charge movement caused while a racer is requesting boost."""
+
+    action_index = _action_index(action)
+    delta = current_charge - previous_charge
+    active = action_index == BOOST_ACTION_INDEX and previous_charge > 0
+    return BoostTelemetry(
+        delta=delta,
+        spent=max(0, -delta) if active else 0,
+        gained=max(0, delta),
+        active=active,
     )
 
 

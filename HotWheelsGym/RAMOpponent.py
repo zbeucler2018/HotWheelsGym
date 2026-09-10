@@ -23,7 +23,6 @@ from .npc_control import (
     progress_delta,
 )
 from .ram_opponent_control import (
-    BOOST_ACTION_INDEX,
     DINO_BONEYARD_PROGRESS_COUNT,
     DINO_RAM_OBSERVATION_SIZE,
     LapSplitTracker,
@@ -31,6 +30,7 @@ from .ram_opponent_control import (
     RaceProgressTracker,
     RacerButtonState,
     build_dino_ram_observation,
+    boost_telemetry,
     player_buttons_from_action,
     race_reward,
     read_racer_states,
@@ -277,7 +277,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         player_respawn_pending = self._race.respawn_pending(0)
         respawned_now = player_respawn_pending and not self._player_respawn_pending
         hit_wall = bool(info.get("hit_wall", False))
-        boost_delta = current.boost - previous.boost
+        boost = boost_telemetry(previous.boost, current.boost, action_index)
         reward = race_reward(
             advance,
             current.speed,
@@ -314,12 +314,10 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         info["ram_player_heading_alignment"] = track.heading_error_cos
         info["ram_player_hit_wall"] = hit_wall
         info["ram_player_respawned"] = respawned_now
-        info["ram_player_boost_delta"] = boost_delta
-        info["ram_player_boost_spent"] = max(0, -boost_delta)
-        info["ram_player_boost_gained"] = max(0, boost_delta)
-        info["ram_player_boost_active"] = (
-            action_index == BOOST_ACTION_INDEX and previous.boost > 0
-        )
+        info["ram_player_boost_delta"] = boost.delta
+        info["ram_player_boost_spent"] = boost.spent
+        info["ram_player_boost_gained"] = boost.gained
+        info["ram_player_boost_active"] = boost.active
         return self._observation(), reward, terminated, truncated, info
 
 
@@ -610,14 +608,15 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
             info[f"{prefix}track_index"] = track.progress_index
             info[f"{prefix}lateral_offset"] = track.lateral_offset
             info[f"{prefix}heading_alignment"] = track.heading_error_cos
-            boost_delta = current_states[slot].boost - previous_states[slot].boost
-            info[f"{prefix}boost_delta"] = boost_delta
-            info[f"{prefix}boost_spent"] = max(0, -boost_delta)
-            info[f"{prefix}boost_gained"] = max(0, boost_delta)
-            info[f"{prefix}boost_active"] = (
-                self._actions[slot] == BOOST_ACTION_INDEX
-                and previous_states[slot].boost > 0
+            boost = boost_telemetry(
+                previous_states[slot].boost,
+                current_states[slot].boost,
+                self._actions[slot],
             )
+            info[f"{prefix}boost_delta"] = boost.delta
+            info[f"{prefix}boost_spent"] = boost.spent
+            info[f"{prefix}boost_gained"] = boost.gained
+            info[f"{prefix}boost_active"] = boost.active
             if isinstance(command, RacerButtonState):
                 info[f"{prefix}buttons_pressed"] = command.pressed
                 info[f"{prefix}buttons_released"] = command.released

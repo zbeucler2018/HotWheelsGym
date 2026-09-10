@@ -154,6 +154,18 @@ class RAMPlayerControlTests(unittest.TestCase):
             {"A", "LEFT"},
         )
 
+    def test_boost_telemetry_excludes_charge_lost_without_boost_action(self):
+        spent = ram.boost_telemetry(980, 972, ram.BOOST_ACTION_INDEX)
+        reset = ram.boost_telemetry(980, 0, 1)
+        gained = ram.boost_telemetry(0, 980, 1)
+
+        self.assertEqual(
+            (spent.delta, spent.spent, spent.gained, spent.active),
+            (-8, 8, 0, True),
+        )
+        self.assertEqual((reset.delta, reset.spent, reset.active), (-980, 0, False))
+        self.assertEqual((gained.delta, gained.gained, gained.active), (980, 980, False))
+
     def test_player_and_converted_npc_actions_have_identical_buttons(self):
         buttons = ("A", "B", "SELECT", "START", "RIGHT", "LEFT", "UP", "DOWN", "R", "L")
         for action_index, action in enumerate(ram.RAM_ACTIONS):
