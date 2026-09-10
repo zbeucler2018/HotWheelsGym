@@ -45,7 +45,7 @@ env = HotWheelsGym.make("HWSTC-dino_boneyard-multi-3")
 
 The repository includes native opponent control. The RAM self-play path patches
 the race manager to create four player-class racers, so model opponents receive
-the same 54-float ego-centric observation and the same seven discrete GBA button
+the same 58-float ego-centric observation and the same seven discrete GBA button
 actions as Player 1. The game still owns physics, collisions, rendering, and
 race management.
 

@@ -18,15 +18,15 @@ from training_scripts.ram_player.sweep import checkpoint_sort_key
 class RAMEvaluationToolTests(unittest.TestCase):
     def test_evaluation_aggregates_track_quality_metrics(self):
         class OneStepEnv(gym.Env):
-            observation_space = gym.spaces.Box(-1.0, 1.0, (54,), np.float32)
+            observation_space = gym.spaces.Box(-1.0, 1.0, (58,), np.float32)
             action_space = gym.spaces.Discrete(7)
 
             def reset(self, *, seed=None, options=None):
-                return np.zeros(54, dtype=np.float32), {}
+                return np.zeros(58, dtype=np.float32), {}
 
             def step(self, action):
                 return (
-                    np.zeros(54, dtype=np.float32),
+                    np.zeros(58, dtype=np.float32),
                     1.0,
                     False,
                     True,
@@ -40,6 +40,10 @@ class RAMEvaluationToolTests(unittest.TestCase):
                         "ram_decision_mean_heading_alignment": 0.75,
                         "ram_decision_wall_frames": 1,
                         "ram_decision_respawns": 1,
+                        "ram_decision_mean_boost_charge": 0.5,
+                        "ram_decision_boost_spent": 8,
+                        "ram_decision_boost_gained": 16,
+                        "ram_decision_boost_frames": 1,
                     },
                 )
 
@@ -54,13 +58,24 @@ class RAMEvaluationToolTests(unittest.TestCase):
         self.assertEqual(result.mean_heading_alignment, 0.75)
         self.assertEqual(result.wall_contact_rate, 0.25)
         self.assertEqual(result.mean_respawns, 1.0)
+        self.assertEqual(result.mean_boost_charge, 0.5)
+        self.assertEqual(result.mean_boost_spent, 8.0)
+        self.assertEqual(result.mean_boost_gained, 16.0)
+        self.assertEqual(result.boost_active_rate, 0.25)
 
     def test_legacy_ram_checkpoint_gets_clear_observation_error(self):
         class LegacyModel:
             observation_space = type("Space", (), {"shape": (43,)})()
 
-        with self.assertRaisesRegex(ValueError, "legacy 43-input checkpoint"):
+        with self.assertRaisesRegex(ValueError, "observation-v1 checkpoint"):
             validate_model_observation_space(LegacyModel(), "old_model.zip")
+
+    def test_v2_ram_checkpoint_gets_clear_boost_migration_error(self):
+        class V2Model:
+            observation_space = type("Space", (), {"shape": (54,)})()
+
+        with self.assertRaisesRegex(ValueError, "observation-v2 checkpoint"):
+            validate_model_observation_space(V2Model(), "v2_model.zip")
 
     def test_white_respawn_frame_detection_rejects_normal_frames(self):
         normal = np.zeros((16, 16, 3), dtype=np.uint8)

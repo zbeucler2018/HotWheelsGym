@@ -14,6 +14,7 @@ from .enums import RaceMode, Tracks
 from .npc_control import (
     DEFAULT_MAX_TARGET_SPEED,
     DEFAULT_MAX_TURN,
+    MAX_BOOST_CHARGE,
     NPCCommand,
     RaceMemory,
     RacerState,
@@ -22,6 +23,7 @@ from .npc_control import (
     progress_delta,
 )
 from .ram_opponent_control import (
+    BOOST_ACTION_INDEX,
     DINO_BONEYARD_PROGRESS_COUNT,
     DINO_RAM_OBSERVATION_SIZE,
     RAM_ACTION_SIZE,
@@ -125,6 +127,7 @@ def _state_info(
         f"{prefix}lap": min(progress.current_lap(slot, state), total_laps),
         f"{prefix}rank": progress.rank(slot, states),
         f"{prefix}speed": state.speed,
+        f"{prefix}boost": state.boost,
         f"{prefix}heading": state.current_heading,
         f"{prefix}completion": progress.completion(slot, state, total_laps),
         f"{prefix}finished": finished,
@@ -206,6 +209,10 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         info["ram_player_heading_alignment"] = track.heading_error_cos
         info["ram_player_hit_wall"] = False
         info["ram_player_respawned"] = False
+        info["ram_player_boost_delta"] = 0
+        info["ram_player_boost_spent"] = 0
+        info["ram_player_boost_gained"] = 0
+        info["ram_player_boost_active"] = False
         return self._observation(), info
 
     def step(self, action: Any) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
@@ -250,6 +257,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         player_respawn_pending = self._race.respawn_pending(0)
         respawned_now = player_respawn_pending and not self._player_respawn_pending
         hit_wall = bool(info.get("hit_wall", False))
+        boost_delta = current.boost - previous.boost
         reward = race_reward(
             advance,
             current.speed,
@@ -286,6 +294,12 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         info["ram_player_heading_alignment"] = track.heading_error_cos
         info["ram_player_hit_wall"] = hit_wall
         info["ram_player_respawned"] = respawned_now
+        info["ram_player_boost_delta"] = boost_delta
+        info["ram_player_boost_spent"] = max(0, -boost_delta)
+        info["ram_player_boost_gained"] = max(0, boost_delta)
+        info["ram_player_boost_active"] = (
+            action_index == BOOST_ACTION_INDEX and previous.boost > 0
+        )
         return self._observation(), reward, terminated, truncated, info
 
 
@@ -304,6 +318,10 @@ class RAMActionRepeat(gym.Wrapper):
         heading_total = 0.0
         wall_frames = 0
         respawns = 0
+        boost_charge_total = 0.0
+        boost_spent = 0
+        boost_gained = 0
+        boost_frames = 0
         observation: Any = None
         info: dict[str, Any] = {}
         terminated = truncated = False
@@ -315,6 +333,10 @@ class RAMActionRepeat(gym.Wrapper):
             heading_total += float(info["ram_player_heading_alignment"])
             wall_frames += int(bool(info["ram_player_hit_wall"]))
             respawns += int(bool(info["ram_player_respawned"]))
+            boost_charge_total += float(info["ram_player_boost"]) / MAX_BOOST_CHARGE
+            boost_spent += int(info["ram_player_boost_spent"])
+            boost_gained += int(info["ram_player_boost_gained"])
+            boost_frames += int(bool(info["ram_player_boost_active"]))
             frames += 1
             if terminated or truncated:
                 break
@@ -324,6 +346,10 @@ class RAMActionRepeat(gym.Wrapper):
         info["ram_decision_mean_heading_alignment"] = heading_total / frames
         info["ram_decision_wall_frames"] = wall_frames
         info["ram_decision_respawns"] = respawns
+        info["ram_decision_mean_boost_charge"] = boost_charge_total / frames
+        info["ram_decision_boost_spent"] = boost_spent
+        info["ram_decision_boost_gained"] = boost_gained
+        info["ram_decision_boost_frames"] = boost_frames
         return observation, total_reward, terminated, truncated, info
 
 
@@ -433,6 +459,10 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
                     finish_frame=None,
                 )
             )
+            info[f"ram_npc_{slot}_boost_delta"] = 0
+            info[f"ram_npc_{slot}_boost_spent"] = 0
+            info[f"ram_npc_{slot}_boost_gained"] = 0
+            info[f"ram_npc_{slot}_boost_active"] = False
         return observation, info
 
     def step(self, player_action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
@@ -543,6 +573,14 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
             info[f"{prefix}track_index"] = track.progress_index
             info[f"{prefix}lateral_offset"] = track.lateral_offset
             info[f"{prefix}heading_alignment"] = track.heading_error_cos
+            boost_delta = current_states[slot].boost - previous_states[slot].boost
+            info[f"{prefix}boost_delta"] = boost_delta
+            info[f"{prefix}boost_spent"] = max(0, -boost_delta)
+            info[f"{prefix}boost_gained"] = max(0, boost_delta)
+            info[f"{prefix}boost_active"] = (
+                self._actions[slot] == BOOST_ACTION_INDEX
+                and previous_states[slot].boost > 0
+            )
             if isinstance(command, RacerButtonState):
                 info[f"{prefix}buttons_pressed"] = command.pressed
                 info[f"{prefix}buttons_released"] = command.released

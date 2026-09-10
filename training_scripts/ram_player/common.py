@@ -42,6 +42,7 @@ MONITOR_INFO_KEYS = (
     "ram_player_lap",
     "ram_player_rank",
     "ram_player_speed",
+    "ram_player_boost",
 )
 
 
@@ -142,17 +143,22 @@ def require_all_opponent_slots(opponents: Mapping[int, Any]) -> None:
 
 
 def validate_model_observation_space(model: Any, path: str | Path) -> None:
-    """Reject legacy 43-input checkpoints with a useful migration message."""
+    """Reject older RAM checkpoints with a useful migration message."""
 
     shape = tuple(getattr(model.observation_space, "shape", ()) or ())
     expected = (DINO_RAM_OBSERVATION_SIZE,)
     if shape != expected:
-        legacy_note = (
-            " This appears to be a legacy 43-input checkpoint; observation v2 "
-            "adds Dino Boneyard centerline cues and must be trained from scratch."
-            if shape == (43,)
-            else ""
-        )
+        legacy_note = ""
+        if shape == (43,):
+            legacy_note = (
+                " This is an observation-v1 checkpoint; v2 added Dino Boneyard "
+                "centerline cues and v3 adds symmetric boost charge."
+            )
+        elif shape == (54,):
+            legacy_note = (
+                " This is an observation-v2 checkpoint; v3 adds each racer's "
+                "normalized boost charge and must be trained from scratch."
+            )
         raise ValueError(
             f"RAM model {path} expects observation shape {shape}, but the active "
             f"contract is {expected}.{legacy_note}"

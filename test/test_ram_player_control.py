@@ -75,7 +75,7 @@ class RAMPlayerControlTests(unittest.TestCase):
                     states, states, tracker, slot, 1
                 )
                 self.assertEqual(len(observation), ram.DINO_RAM_OBSERVATION_SIZE)
-                self.assertEqual(ram.DINO_RAM_OBSERVATION_SIZE, 54)
+                self.assertEqual(ram.DINO_RAM_OBSERVATION_SIZE, 58)
                 self.assertEqual(len(observation), len(ram.RAM_OBSERVATION_NAMES))
                 self.assertTrue(all(-1.0 <= value <= 1.0 for value in observation))
 
@@ -100,7 +100,38 @@ class RAMPlayerControlTests(unittest.TestCase):
             "track_curvature_long",
         }
         self.assertTrue(expected.issubset(set(ram.RAM_OBSERVATION_NAMES)))
-        self.assertEqual(ram.DINO_RAM_OBSERVATION_VERSION, 2)
+        self.assertEqual(ram.DINO_RAM_OBSERVATION_VERSION, 3)
+
+    def test_boost_charge_is_symmetric_for_player_and_opponents(self):
+        state_path = (
+            ROOT
+            / "training_scripts"
+            / "data"
+            / "states"
+            / "dino_boneyard_multi_180.state"
+        )
+        race = npc.RaceMemory(state_memory(state_path))
+        states = ram.read_racer_states(race)
+        tracker = ram.RaceProgressTracker.from_states(
+            states, ram.DINO_BONEYARD_PROGRESS_COUNT
+        )
+        expected = {0: 1.0, 1: 600 / 980, 2: 450 / 980, 3: 1.0}
+        boost_index = ram.RAM_OBSERVATION_NAMES.index("self_boost_charge")
+
+        for slot, charge in expected.items():
+            with self.subTest(slot=slot):
+                observation = ram.build_dino_ram_observation(
+                    states, states, tracker, slot, 1
+                )
+                self.assertAlmostEqual(observation[boost_index], charge)
+                other_slots = ram._ordered_other_slots(slot, states, tracker)
+                for position, other_slot in enumerate(other_slots, start=1):
+                    other_index = ram.RAM_OBSERVATION_NAMES.index(
+                        f"nearby_racer_{position}_boost_charge"
+                    )
+                    self.assertAlmostEqual(
+                        observation[other_index], expected[other_slot]
+                    )
 
     def test_track_features_cover_every_configured_training_state(self):
         states_dir = ROOT / "training_scripts" / "data" / "states"

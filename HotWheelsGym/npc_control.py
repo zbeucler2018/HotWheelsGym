@@ -19,6 +19,7 @@ RACER_CURRENT_HEADING_OFFSET = 0xDE
 RACER_STEERING_HEADING_OFFSET = 0xD8
 RACER_DESIRED_HEADING_OFFSET = 0xE0
 RACER_SPEED_OFFSET = 0xE8
+RACER_BOOST_OFFSET = 0xF0
 RACER_X_OFFSET = 0xF8
 RACER_Z_OFFSET = 0x100
 RACER_PROGRESS_OFFSET = 0x148
@@ -44,6 +45,7 @@ NPC_BUTTON_CONTROL_PATCH_VERSION = 3
 HEADING_PERIOD = 0x1000
 DEFAULT_MAX_TURN = 0x200
 DEFAULT_MAX_TARGET_SPEED = 0x12000
+MAX_BOOST_CHARGE = 980
 OBSERVATION_SIZE = 12
 
 TRACK_PROGRESS_COUNTS = {
@@ -127,6 +129,7 @@ class RacerState:
     x: int
     z: int
     rank: int
+    boost: int = 0
 
 
 @dataclass(frozen=True)
@@ -264,6 +267,7 @@ class RaceMemory:
             )
             & (HEADING_PERIOD - 1),
             speed=_read_u32(self.memory, racer.address + RACER_SPEED_OFFSET),
+            boost=_read_u32(self.memory, racer.address + RACER_BOOST_OFFSET),
             target_speed=_read_u32(
                 self.memory, racer.address + RACER_TARGET_SPEED_OFFSET
             ),

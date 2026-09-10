@@ -1,5 +1,6 @@
 import gzip
 import importlib.util
+import json
 from pathlib import Path
 import struct
 import sys
@@ -71,6 +72,23 @@ class NPCControlTests(unittest.TestCase):
         self.assertEqual(command.target_speed, npc.DEFAULT_MAX_TARGET_SPEED // 2)
         self.assertEqual(after.desired_heading, command.desired_heading)
         self.assertEqual(after.target_speed, command.target_speed)
+
+    def test_boost_is_the_same_racer_local_field_on_every_track(self):
+        for path in sorted(self.integration.glob("*_multi.state")):
+            with self.subTest(state=path.name):
+                memory = state_memory(path)
+                race = npc.RaceMemory(memory)
+                player = race.layout.racer(0)
+                with path.with_suffix(".json").open() as handle:
+                    configured = json.load(handle)["info"]["boost"]["address"]
+                self.assertEqual(
+                    player.address + npc.RACER_BOOST_OFFSET,
+                    configured,
+                )
+                self.assertEqual(
+                    race.state(0).boost,
+                    memory.extract(configured, "<u4"),
+                )
 
     def test_structured_observation_is_bounded_and_seeds_stock_heading(self):
         path = self.integration / "dino_boneyard_multi.state"

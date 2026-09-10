@@ -57,12 +57,25 @@ def record_model(
     terminated = truncated = False
     reward_sum = 0.0
     decision_steps = 0
+    observed_frames = 0
+    boost_charge_total = 0.0
+    boost_spent = 0
+    boost_gained = 0
+    boost_active_frames = 0
     try:
         while not (terminated or truncated):
             action, _ = model.predict(observation, deterministic=True)
             observation, reward, terminated, truncated, info = env.step(action)
             reward_sum += float(reward)
             decision_steps += 1
+            frames = int(info.get("ram_action_repeat_frames", frame_skip))
+            observed_frames += frames
+            boost_charge_total += (
+                float(info.get("ram_decision_mean_boost_charge", 0.0)) * frames
+            )
+            boost_spent += int(info.get("ram_decision_boost_spent", 0))
+            boost_gained += int(info.get("ram_decision_boost_gained", 0))
+            boost_active_frames += int(info.get("ram_decision_boost_frames", 0))
             encoder.write(env.render())
     finally:
         encoder.close()
@@ -80,6 +93,12 @@ def record_model(
         "finished": bool(info.get("ram_player_finished", False)),
         "completion": float(info.get("ram_player_completion", 0.0)),
         "rank": int(info.get("ram_player_rank", 4)),
+        "final_boost": int(info.get("ram_player_boost", 0)),
+        "mean_boost_charge": boost_charge_total / max(1, observed_frames),
+        "boost_spent": boost_spent,
+        "boost_gained": boost_gained,
+        "boost_active_frames": boost_active_frames,
+        "boost_active_rate": boost_active_frames / max(1, observed_frames),
         "lateral_offset": float(info.get("ram_player_lateral_offset", 0.0)),
         "heading_alignment": float(info.get("ram_player_heading_alignment", 0.0)),
     }
@@ -101,6 +120,7 @@ def record_model(
                     info.get(f"ram_npc_{slot}_heading_alignment", 0.0)
                 ),
                 "speed": int(info.get(f"ram_npc_{slot}_speed", 0)),
+                "boost": int(info.get(f"ram_npc_{slot}_boost", 0)),
                 "action": int(info.get(f"ram_npc_{slot}_action", 0)),
             }
             for slot in sorted(opponent_paths)

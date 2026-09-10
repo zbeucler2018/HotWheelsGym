@@ -25,6 +25,10 @@ class RAMEvaluation:
     mean_heading_alignment: float
     wall_contact_rate: float
     mean_respawns: float
+    mean_boost_charge: float
+    mean_boost_spent: float
+    mean_boost_gained: float
+    boost_active_rate: float
     selection_score: float
 
 
@@ -50,6 +54,10 @@ def evaluate_ram_policy(
     heading_alignments: list[float] = []
     wall_contact_rates: list[float] = []
     respawn_counts: list[float] = []
+    boost_charges: list[float] = []
+    boost_spent_totals: list[float] = []
+    boost_gained_totals: list[float] = []
+    boost_active_rates: list[float] = []
     scores: list[float] = []
 
     for _ in range(episodes):
@@ -63,6 +71,10 @@ def evaluate_ram_policy(
         wall_frames = 0
         observed_frames = 0
         respawns = 0
+        boost_charge_total = 0.0
+        boost_spent = 0
+        boost_gained = 0
+        boost_frames = 0
         info: dict[str, Any] = {}
         while not (terminated or truncated):
             action, _ = model.predict(observation, deterministic=True)
@@ -78,6 +90,12 @@ def evaluate_ram_policy(
             heading_total += float(info["ram_decision_mean_heading_alignment"]) * frames
             wall_frames += int(info["ram_decision_wall_frames"])
             respawns += int(info["ram_decision_respawns"])
+            boost_charge_total += (
+                float(info.get("ram_decision_mean_boost_charge", 0.0)) * frames
+            )
+            boost_spent += int(info.get("ram_decision_boost_spent", 0))
+            boost_gained += int(info.get("ram_decision_boost_gained", 0))
+            boost_frames += int(info.get("ram_decision_boost_frames", 0))
 
         finished = bool(info.get("ram_player_finished", False))
         completion = float(info.get("ram_player_completion", 0.0))
@@ -102,6 +120,10 @@ def evaluate_ram_policy(
         heading_alignments.append(heading_total / max(1, observed_frames))
         wall_contact_rates.append(wall_frames / max(1, observed_frames))
         respawn_counts.append(float(respawns))
+        boost_charges.append(boost_charge_total / max(1, observed_frames))
+        boost_spent_totals.append(float(boost_spent))
+        boost_gained_totals.append(float(boost_gained))
+        boost_active_rates.append(boost_frames / max(1, observed_frames))
         scores.append(score)
 
     return RAMEvaluation(
@@ -116,6 +138,10 @@ def evaluate_ram_policy(
         mean_heading_alignment=fmean(heading_alignments),
         wall_contact_rate=fmean(wall_contact_rates),
         mean_respawns=fmean(respawn_counts),
+        mean_boost_charge=fmean(boost_charges),
+        mean_boost_spent=fmean(boost_spent_totals),
+        mean_boost_gained=fmean(boost_gained_totals),
+        boost_active_rate=fmean(boost_active_rates),
         selection_score=fmean(scores),
     )
 
@@ -162,6 +188,10 @@ class RAMEvalCallback(BaseCallback):
                         "mean_heading_alignment",
                         "wall_contact_rate",
                         "mean_respawns",
+                        "mean_boost_charge",
+                        "mean_boost_spent",
+                        "mean_boost_gained",
+                        "boost_active_rate",
                         "selection_score",
                     )
                 )
@@ -185,6 +215,10 @@ class RAMEvalCallback(BaseCallback):
             "mean_heading_alignment": result.mean_heading_alignment,
             "wall_contact_rate": result.wall_contact_rate,
             "mean_respawns": result.mean_respawns,
+            "mean_boost_charge": result.mean_boost_charge,
+            "mean_boost_spent": result.mean_boost_spent,
+            "mean_boost_gained": result.mean_boost_gained,
+            "boost_active_rate": result.boost_active_rate,
             "selection_score": result.selection_score,
         }
         for name, value in values.items():
@@ -203,7 +237,8 @@ class RAMEvalCallback(BaseCallback):
                 f"finish_frames={result.mean_finish_frames:.1f} "
                 f"rank={result.mean_rank:.2f} "
                 f"lateral={result.mean_abs_lateral_offset:.3f} "
-                f"wall={result.wall_contact_rate:.1%}"
+                f"wall={result.wall_contact_rate:.1%} "
+                f"boost_spent={result.mean_boost_spent:.0f}"
             )
         if result.selection_score > self.best_score:
             self.best_score = result.selection_score

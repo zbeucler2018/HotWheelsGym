@@ -105,9 +105,10 @@ the `HWBT` version-3 marker and expected SHA-1
 
 Observation version 2 adds a 342-point reference line derived from median X/Z
 telemetry for all three stock CPU racers over repeated laps. Live racers are
-projected onto nearby segments. The shared 54-float Player/NPC observation now
-includes signed lateral offset, heading error, three ego-relative lookahead
-directions, and medium/long signed curvature.
+projected onto nearby segments. Observation version 3 gives Player 1 and every
+NPC the same 58 floats: the v2 centerline features plus each racer's normalized
+boost charge. Boost is racer-local at `+0xF0` on every bundled multiplayer
+track; Dino Boneyard has no additional power-up type to expose.
 
 A 12,000-frame native-racer replay produced a median normalized lateral error
 of 0.0023 (95th percentile 0.112), mean heading alignment of 0.938, and a local

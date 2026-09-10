@@ -62,11 +62,15 @@ Each timestamped run contains:
 Evaluation runs at startup, every 250,000 timesteps, and at shutdown. It uses a
 separate deterministic start-line race and records completion, finish rate,
 raw finish frames, mean speed, rank, centerline error, heading alignment,
-wall-contact rate, and respawn count.
+wall-contact rate, respawn count, mean boost charge, boost gained/spent, and
+the fraction of emulator frames on which boost was requested while charge was
+available.
 
 After the environments close, the trainer automatically records one
 deterministic start-line race using `evaluation/best_model.zip`. The MP4 plays
 at real-time speed (15 encoded frames per second for four-frame action repeat).
+Its JSON sidecar records final/mean boost charge, charge gained/spent, and boost
+active frames in addition to race outcome and track-quality metrics.
 Pass `--no-record-video` only when this final recording is not wanted.
 
 ## Re-evaluate a completed run
@@ -87,10 +91,10 @@ directory; videos are intentionally not encoded as TensorBoard images.
 
 ## Observation and action contract
 
-Every controlled racer—Player 1 or an opponent—gets the same 54 normalized
+Every controlled racer—Player 1 or an opponent—gets the same 58 normalized
 floats, rotated so that racer is always the observation's ego:
 
-- heading sine/cosine, absolute Dino X/Z, speed, and checkpoint phase;
+- heading sine/cosine, absolute Dino X/Z, speed, boost charge, and checkpoint phase;
 - tracked lap and race rank;
 - acceleration, turn rate, and progress rate;
 - signed centerline offset and heading error relative to the road;
@@ -98,7 +102,7 @@ floats, rotated so that racer is always the observation's ego:
 - medium- and long-range signed track curvature;
 - a seven-value one-hot encoding of the previous action;
 - for the three nearest racers: ego-frame forward/right/distance, relative
-  total progress, speed, heading sine/cosine, and relative lap.
+  total progress, speed, boost charge, heading sine/cosine, and relative lap.
 
 The Dino reference line contains one X/Z point per modulo-342 progress unit. It
 was derived from median native-racer telemetry over repeated laps; no ROM bytes
@@ -106,11 +110,21 @@ or images are stored. Each live racer is projected onto nearby reference-line
 segments, so Player 1 and every model opponent get the same local geometry even
 when they occupy different parts of the track.
 
-This is observation contract version 2. The previous 43-input checkpoints are
-intentionally incompatible: their neural-network input layer cannot accept the
-new road features. The tools detect those checkpoints and report a clear error
-instead of silently feeding a mismatched observation. Train the first v2 model
-from scratch; subsequent v2 checkpoints can be used symmetrically for self-play.
+This is observation contract version 3. The racer-local boost meter at `+0xF0`
+is normalized from 0 to its maximum of 980. The same offset was verified against
+the configured Player 1 boost address on every bundled multiplayer track and
+against all four Dino racer objects. The neighboring `+0xEC` field is only a
+lagging display value and is intentionally excluded.
+
+Previous 43-input v1 and 54-input v2 checkpoints are intentionally incompatible:
+their neural-network input layers cannot accept the new features. The tools
+detect both formats and report a clear migration error. Train the first v3 model
+from scratch; subsequent v3 checkpoints can be used symmetrically for self-play.
+
+Dino Boneyard has boost but no alternate power-up inventory, so v3 does not
+invent a power-up type field. Tracks with additional power-ups will need their
+racer-local inventory/type fields mapped and appended in a later track-specific
+observation contract.
 
 The reward remains progress-dominant and finish-aware. Small shaping penalties
 now discourage wall contact, large centerline error, wrong-way alignment, and a
