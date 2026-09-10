@@ -76,6 +76,69 @@ active frames in addition to exact lap-split frames/seconds, race outcome, and
 track-quality metrics.
 Pass `--no-record-video` only when this final recording is not wanted.
 
+## Validated project checkpoint (2026-09-10)
+
+The first boost-aware observation-v3 run completed from scratch against the
+stock opponents at 5 million PPO timesteps. A deterministic start-line sweep
+then evaluated all 20 periodic checkpoints plus `final_model.zip` with the
+6,000-decision finish horizon. The retained winner was the 2,999,988-step
+checkpoint:
+
+- three-lap time: **4:32.52** (`16,351` raw frames at 60 Hz);
+- lap splits: **1:32.37**, **1:28.73**, and **1:31.42**;
+- result: first place with one Player 1 respawn;
+- mean boost charge: `0.484` of capacity;
+- boost requested while charged on `7.22%` of emulator frames;
+- boost charge gained/spent: `6,396` / `1,472`.
+
+The 4.25-million-step checkpoint produced the fastest individual evaluated lap
+at **1:27.35**, but its **4:34.40** total was slower. The sweep reproduced the
+same 3-million-step winner selected during training and confirmed substantial
+late-training PPO regression: the separately saved final model ran **4:50.80**
+and finished third.
+
+For context, the previous observation-v2 RAM model ran **4:27.98**, the best
+known pixel agent ran about **4:24**, and the supplied console reference was
+**4:22.15**. Observation v3 therefore succeeded at making boost state visible
+and produced intentional boost use, but did not improve total race time. Its
+near-reference single-lap pace suggests that consistency, wall avoidance, and
+eliminating the respawn are more valuable next targets than merely increasing
+boost use.
+
+The local ignored artifacts are under:
+
+```text
+training_scripts/ram_runs/dino_ram_player_boost_v3_20260910T031248Z/
+  evaluation_sweep_20260910T181225Z/
+    checkpoint_results.csv
+    fastest_model.zip
+    fastest_model.mp4
+    fastest_model.json
+    summary.json
+```
+
+At this checkpoint, symmetric native-button control is proven for Player 1 and
+all three model-controlled opponent slots. They receive the same racer-centric
+58-float observation and seven-action contract, while the original game owns
+physics, collision, race state, and rendering. Opponent-only respawn flashes
+are isolated so they no longer reset or blank Player 1's observation. A frozen
+model can already occupy all three opponent slots for evaluation; a learning
+self-play training run has not yet been performed.
+
+Recommended continuation:
+
+1. add sector timing and record the progress location of walls, stalls, and
+   respawns;
+2. resume the 3-million-step winner with smaller PPO updates and oversample the
+   slow/failure sectors before full-race fine-tuning;
+3. rank checkpoints over multiple start-line races, preferring reliable
+   zero-respawn finishes and then median finish time;
+4. perform a small portability audit on one track with an additional power-up,
+   moving centerline, progress, state, and power-up differences into per-track
+   configuration rather than duplicating the environment;
+5. introduce a frozen-checkpoint opponent pool only after the solo policy can
+   repeat clean races near or below the pixel baseline.
+
 ## Re-evaluate a completed run
 
 The checkpoint sweep evaluates every periodic checkpoint plus `final_model.zip`
@@ -144,7 +207,11 @@ There are seven discrete actions:
 | 3 | accelerate right | A + Right |
 | 4 | brake | B |
 | 5 | accelerate/up | A + Up |
-| 6 | boost | A + L + R |
+| 6 | boost while accelerating | A + L + R |
+
+The game's boost chord itself is **L+R**. The shared controller action also
+holds **A** so choosing boost does not release the accelerator; this is why the
+policy metadata records `A + L + R`.
 
 The native-button ROM makes all four race slots genuine player-class racers.
 Player 1 continues sampling the hardware keypad; slots 1–3 instead retain the
