@@ -40,6 +40,9 @@ MONITOR_INFO_KEYS = (
     "ram_player_rank",
     "ram_player_speed",
     "ram_player_boost",
+    "ram_player_power_up_type",
+    "ram_player_jet_boost_remaining",
+    "ram_player_jet_boost_pickups",
     "ram_player_lap_1_frames",
     "ram_player_lap_2_frames",
     "ram_player_lap_3_frames",
@@ -146,12 +149,20 @@ def validate_model_observation_space(model: Any, path: str | Path) -> None:
         if shape == (43,):
             legacy_note = (
                 " This is an observation-v1 checkpoint; v2 added Dino Boneyard "
-                "centerline cues and v3 adds symmetric boost charge."
+                "centerline cues, v3 added symmetric boost charge, and v4 adds "
+                "the symmetric Jet Boost countdown."
             )
         elif shape == (54,):
             legacy_note = (
-                " This is an observation-v2 checkpoint; v3 adds each racer's "
-                "normalized boost charge and must be trained from scratch."
+                " This is an observation-v2 checkpoint; v3 added each racer's "
+                "normalized boost charge and v4 adds the symmetric Jet Boost "
+                "countdown. Train v4 from scratch."
+            )
+        elif shape == (58,):
+            legacy_note = (
+                " This is an observation-v3 checkpoint; v4 adds each controlled "
+                "racer's normalized Jet Boost countdown and must be trained from "
+                "scratch."
             )
         raise ValueError(
             f"RAM model {path} expects observation shape {shape}, but the active "

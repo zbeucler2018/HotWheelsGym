@@ -64,16 +64,17 @@ separate deterministic start-line race and records completion, finish rate,
 raw finish frames, mean speed, rank, centerline error, heading alignment,
 wall-contact rate, respawn count, mean boost charge, boost gained/spent, and
 the fraction of emulator frames on which boost was requested while charge was
-available. Completed-lap times appear as `mean_lap_1_seconds`,
+available. It also records the mean remaining handling/Jet Boost effect,
+active-frame rate, and number of pickups. Completed-lap times appear as `mean_lap_1_seconds`,
 `mean_lap_2_seconds`, and `mean_lap_3_seconds` in TensorBoard and the evaluation
 CSV.
 
 After the environments close, the trainer automatically records one
 deterministic start-line race using `evaluation/best_model.zip`. The MP4 plays
 at real-time speed (15 encoded frames per second for four-frame action repeat).
-Its JSON sidecar records final/mean boost charge, charge gained/spent, and boost
-active frames in addition to exact lap-split frames/seconds, race outcome, and
-track-quality metrics.
+Its JSON sidecar records final/mean boost charge, charge gained/spent, boost
+active frames, and handling/Jet Boost timing and pickup counts in addition to
+exact lap-split frames/seconds, race outcome, and track-quality metrics.
 Pass `--no-record-video` only when this final recording is not wanted.
 
 ## Validated project checkpoint (2026-09-10)
@@ -117,7 +118,7 @@ training_scripts/ram_runs/dino_ram_player_boost_v3_20260910T031248Z/
     summary.json
 ```
 
-At this checkpoint, symmetric native-button control is proven for Player 1 and
+For this historical v3 checkpoint, symmetric native-button control is proven for Player 1 and
 all three model-controlled opponent slots. They receive the same racer-centric
 58-float observation and seven-action contract, while the original game owns
 physics, collision, race state, and rendering. Opponent-only respawn flashes
@@ -133,9 +134,9 @@ Recommended continuation:
    slow/failure sectors before full-race fine-tuning;
 3. rank checkpoints over multiple start-line races, preferring reliable
    zero-respawn finishes and then median finish time;
-4. perform a small portability audit on one track with an additional power-up,
-   moving centerline, progress, state, and power-up differences into per-track
-   configuration rather than duplicating the environment;
+4. perform a small portability audit on a track with different power-ups,
+   confirming its racer-local type/timer semantics and moving any track-specific
+   differences into configuration rather than duplicating the environment;
 5. introduce a frozen-checkpoint opponent pool only after the solo policy can
    repeat clean races near or below the pixel baseline.
 
@@ -157,10 +158,11 @@ directory; videos are intentionally not encoded as TensorBoard images.
 
 ## Observation and action contract
 
-Every controlled racer—Player 1 or an opponent—gets the same 58 normalized
+Every controlled racer—Player 1 or an opponent—gets the same 59 normalized
 floats, rotated so that racer is always the observation's ego:
 
-- heading sine/cosine, absolute Dino X/Z, speed, boost charge, and checkpoint phase;
+- heading sine/cosine, absolute Dino X/Z, speed, boost charge, normalized
+  handling/Jet Boost countdown, and checkpoint phase;
 - tracked lap and race rank;
 - acceleration, turn rate, and progress rate;
 - signed centerline offset and heading error relative to the road;
@@ -176,21 +178,27 @@ or images are stored. Each live racer is projected onto nearby reference-line
 segments, so Player 1 and every model opponent get the same local geometry even
 when they occupy different parts of the track.
 
-This is observation contract version 3. The racer-local boost meter at `+0xF0`
+This is observation contract version 4. The racer-local boost meter at `+0xF0`
 is normalized from 0 to its maximum of 980. The same offset was verified against
 the configured Player 1 boost address on every bundled multiplayer track and
 against all four Dino racer objects. The neighboring `+0xEC` field is only a
 lagging display value and is intentionally excluded.
 
-Previous 43-input v1 and 54-input v2 checkpoints are intentionally incompatible:
-their neural-network input layers cannot accept the new features. The tools
-detect both formats and report a clear migration error. Train the first v3 model
-from scratch; subsequent v3 checkpoints can be used symmetrically for self-play.
+The handling pickup is called Jet Boost by the game. Racer byte `+0x14D` is its
+power-up type (`3` for Jet Boost), and byte `+0x14E` is its remaining countdown,
+which starts near 150 and decrements while the effect is active. The observation
+is `countdown / 150` when type 3 is equipped and zero for every other type. Moving
+the pickup into a fixed Player 1 trajectory caused both bytes to change; clearing
+either byte from that same acquired state removed the handling benefit through
+the hairpin. This distinguishes the feature from the unrelated skid/steering
+state near racer offset `+0x27D`.
 
-Dino Boneyard has boost but no alternate power-up inventory, so v3 does not
-invent a power-up type field. Tracks with additional power-ups will need their
-racer-local inventory/type fields mapped and appended in a later track-specific
-observation contract.
+Previous 43-input v1, 54-input v2, and 58-input v3 checkpoints are intentionally incompatible:
+their neural-network input layers cannot accept the new features. The tools
+detect all three formats and report a clear migration error. Train the first v4
+model from scratch; subsequent v4 checkpoints can be used symmetrically for
+self-play. Other tracks' power-up types still need a portability audit before
+their effects are added to this Dino-specific contract.
 
 The reward remains progress-dominant and finish-aware. Small shaping penalties
 now discourage wall contact, large centerline error, wrong-way alignment, and a

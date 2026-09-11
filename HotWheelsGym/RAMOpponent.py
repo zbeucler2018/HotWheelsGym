@@ -13,6 +13,7 @@ from .dino_boneyard_track import dino_track_pose
 from .enums import RaceMode, Tracks
 from .npc_control import (
     MAX_BOOST_CHARGE,
+    MAX_JET_BOOST_TIMER,
     RaceMemory,
     RacerState,
     button_controlled_vehicle_indices_from_rom,
@@ -109,6 +110,9 @@ def _state_info(
         f"{prefix}rank": progress.rank(slot, states),
         f"{prefix}speed": state.speed,
         f"{prefix}boost": state.boost,
+        f"{prefix}power_up_type": state.power_up_type,
+        f"{prefix}jet_boost_remaining": state.jet_boost_remaining,
+        f"{prefix}jet_boost_active": state.jet_boost_remaining > 0,
         f"{prefix}heading": state.current_heading,
         f"{prefix}completion": progress.completion(slot, state, total_laps),
         f"{prefix}finished": finished,
@@ -139,6 +143,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         self._finish_frame: int | None = None
         self._lap_timing: LapSplitTracker | None = None
         self._player_respawn_pending = False
+        self._jet_boost_pickups = 0
         self.action_space = gym.spaces.Discrete(RAM_ACTION_SIZE)
         self.observation_space = gym.spaces.Box(
             low=-1.0,
@@ -185,6 +190,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
             self.progress_tracker.current_lap(0, self._states[0]), total_laps
         )
         self._player_respawn_pending = self._race.respawn_pending(0)
+        self._jet_boost_pickups = 0
         info.update(
             _state_info(
                 "ram_player_",
@@ -207,6 +213,8 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         info["ram_player_boost_spent"] = 0
         info["ram_player_boost_gained"] = 0
         info["ram_player_boost_active"] = False
+        info["ram_player_jet_boost_acquired"] = False
+        info["ram_player_jet_boost_pickups"] = 0
         return self._observation(), info
 
     def step(self, action: Any) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
@@ -256,6 +264,8 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         respawned_now = player_respawn_pending and not self._player_respawn_pending
         hit_wall = bool(info.get("hit_wall", False))
         boost = boost_telemetry(previous.boost, current.boost, action_index)
+        jet_boost_acquired = current.jet_boost_remaining > previous.jet_boost_remaining
+        self._jet_boost_pickups += int(jet_boost_acquired)
         reward = race_reward(
             advance,
             current.speed,
@@ -295,6 +305,8 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         info["ram_player_boost_spent"] = boost.spent
         info["ram_player_boost_gained"] = boost.gained
         info["ram_player_boost_active"] = boost.active
+        info["ram_player_jet_boost_acquired"] = jet_boost_acquired
+        info["ram_player_jet_boost_pickups"] = self._jet_boost_pickups
         return self._observation(), reward, terminated, truncated, info
 
 
@@ -317,6 +329,9 @@ class RAMActionRepeat(gym.Wrapper):
         boost_spent = 0
         boost_gained = 0
         boost_frames = 0
+        jet_boost_remaining_total = 0.0
+        jet_boost_frames = 0
+        jet_boost_pickups = 0
         observation: Any = None
         info: dict[str, Any] = {}
         terminated = truncated = False
@@ -332,6 +347,9 @@ class RAMActionRepeat(gym.Wrapper):
             boost_spent += int(info["ram_player_boost_spent"])
             boost_gained += int(info["ram_player_boost_gained"])
             boost_frames += int(bool(info["ram_player_boost_active"]))
+            jet_boost_remaining_total += float(info["ram_player_jet_boost_remaining"])
+            jet_boost_frames += int(bool(info["ram_player_jet_boost_active"]))
+            jet_boost_pickups += int(bool(info["ram_player_jet_boost_acquired"]))
             frames += 1
             if terminated or truncated:
                 break
@@ -345,6 +363,11 @@ class RAMActionRepeat(gym.Wrapper):
         info["ram_decision_boost_spent"] = boost_spent
         info["ram_decision_boost_gained"] = boost_gained
         info["ram_decision_boost_frames"] = boost_frames
+        info["ram_decision_mean_jet_boost_remaining"] = jet_boost_remaining_total / (
+            MAX_JET_BOOST_TIMER * frames
+        )
+        info["ram_decision_jet_boost_frames"] = jet_boost_frames
+        info["ram_decision_jet_boost_pickups"] = jet_boost_pickups
         return observation, total_reward, terminated, truncated, info
 
 
@@ -383,6 +406,7 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         self._finish_frames: dict[int, int | None] = {}
         self._lap_timings: dict[int, LapSplitTracker] = {}
         self._button_masks: dict[int, int] = {}
+        self._jet_boost_pickups: dict[int, int] = {}
         self._raw_frame = 0
         self._last_visible_frame: np.ndarray | None = None
         self._render_override: np.ndarray | None = None
@@ -420,6 +444,7 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         )
         self._actions = {slot: 0 for slot in slots}
         self._button_masks = {slot: 0 for slot in slots}
+        self._jet_boost_pickups = {slot: 0 for slot in slots}
         for slot in slots:
             write_racer_buttons(self._race, slot, 0, 0)
         self._frames_until_action = {slot: 0 for slot in slots}
@@ -459,6 +484,8 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
             info[f"ram_npc_{slot}_boost_spent"] = 0
             info[f"ram_npc_{slot}_boost_gained"] = 0
             info[f"ram_npc_{slot}_boost_active"] = False
+            info[f"ram_npc_{slot}_jet_boost_acquired"] = False
+            info[f"ram_npc_{slot}_jet_boost_pickups"] = 0
         return observation, info
 
     def step(self, player_action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
@@ -576,6 +603,13 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
             info[f"{prefix}boost_spent"] = boost.spent
             info[f"{prefix}boost_gained"] = boost.gained
             info[f"{prefix}boost_active"] = boost.active
+            jet_boost_acquired = (
+                current_states[slot].jet_boost_remaining
+                > previous_states[slot].jet_boost_remaining
+            )
+            self._jet_boost_pickups[slot] += int(jet_boost_acquired)
+            info[f"{prefix}jet_boost_acquired"] = jet_boost_acquired
+            info[f"{prefix}jet_boost_pickups"] = self._jet_boost_pickups[slot]
             info[f"{prefix}buttons_pressed"] = buttons.pressed
             info[f"{prefix}buttons_released"] = buttons.released
             info[f"{prefix}buttons_held"] = buttons.held

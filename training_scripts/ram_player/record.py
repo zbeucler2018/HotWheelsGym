@@ -60,6 +60,9 @@ def record_model(
     boost_spent = 0
     boost_gained = 0
     boost_active_frames = 0
+    jet_boost_remaining_total = 0.0
+    jet_boost_active_frames = 0
+    jet_boost_pickups = 0
     try:
         while not (terminated or truncated):
             action, _ = model.predict(observation, deterministic=True)
@@ -74,6 +77,11 @@ def record_model(
             boost_spent += int(info.get("ram_decision_boost_spent", 0))
             boost_gained += int(info.get("ram_decision_boost_gained", 0))
             boost_active_frames += int(info.get("ram_decision_boost_frames", 0))
+            jet_boost_remaining_total += (
+                float(info.get("ram_decision_mean_jet_boost_remaining", 0.0)) * frames
+            )
+            jet_boost_active_frames += int(info.get("ram_decision_jet_boost_frames", 0))
+            jet_boost_pickups += int(info.get("ram_decision_jet_boost_pickups", 0))
             encoder.write(env.render())
     finally:
         encoder.close()
@@ -97,6 +105,14 @@ def record_model(
         "boost_gained": boost_gained,
         "boost_active_frames": boost_active_frames,
         "boost_active_rate": boost_active_frames / max(1, observed_frames),
+        "final_power_up_type": int(info.get("ram_player_power_up_type", 0xFF)),
+        "final_jet_boost_remaining": int(info.get("ram_player_jet_boost_remaining", 0)),
+        "mean_jet_boost_remaining": (
+            jet_boost_remaining_total / max(1, observed_frames)
+        ),
+        "jet_boost_active_frames": jet_boost_active_frames,
+        "jet_boost_active_rate": (jet_boost_active_frames / max(1, observed_frames)),
+        "jet_boost_pickups": jet_boost_pickups,
         "lap_split_frames": [
             int(info.get(f"ram_player_lap_{lap}_frames", 0)) for lap in (1, 2, 3)
         ],
@@ -125,6 +141,13 @@ def record_model(
                 ),
                 "speed": int(info.get(f"ram_npc_{slot}_speed", 0)),
                 "boost": int(info.get(f"ram_npc_{slot}_boost", 0)),
+                "power_up_type": int(info.get(f"ram_npc_{slot}_power_up_type", 0xFF)),
+                "jet_boost_remaining": int(
+                    info.get(f"ram_npc_{slot}_jet_boost_remaining", 0)
+                ),
+                "jet_boost_pickups": int(
+                    info.get(f"ram_npc_{slot}_jet_boost_pickups", 0)
+                ),
                 "lap_split_frames": [
                     int(info.get(f"ram_npc_{slot}_lap_{lap}_frames", 0))
                     for lap in (1, 2, 3)

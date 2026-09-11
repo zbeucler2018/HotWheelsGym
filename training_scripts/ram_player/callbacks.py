@@ -29,6 +29,9 @@ class RAMEvaluation:
     mean_boost_spent: float
     mean_boost_gained: float
     boost_active_rate: float
+    mean_jet_boost_remaining: float
+    jet_boost_active_rate: float
+    mean_jet_boost_pickups: float
     mean_lap_1_seconds: float
     mean_lap_2_seconds: float
     mean_lap_3_seconds: float
@@ -61,6 +64,9 @@ def evaluate_ram_policy(
     boost_spent_totals: list[float] = []
     boost_gained_totals: list[float] = []
     boost_active_rates: list[float] = []
+    jet_boost_remaining_values: list[float] = []
+    jet_boost_active_rates: list[float] = []
+    jet_boost_pickup_counts: list[float] = []
     lap_splits: dict[int, list[float]] = {lap: [] for lap in (1, 2, 3)}
     scores: list[float] = []
 
@@ -79,6 +85,9 @@ def evaluate_ram_policy(
         boost_spent = 0
         boost_gained = 0
         boost_frames = 0
+        jet_boost_remaining_total = 0.0
+        jet_boost_frames = 0
+        jet_boost_pickups = 0
         info: dict[str, Any] = {}
         while not (terminated or truncated):
             action, _ = model.predict(observation, deterministic=True)
@@ -100,6 +109,11 @@ def evaluate_ram_policy(
             boost_spent += int(info.get("ram_decision_boost_spent", 0))
             boost_gained += int(info.get("ram_decision_boost_gained", 0))
             boost_frames += int(info.get("ram_decision_boost_frames", 0))
+            jet_boost_remaining_total += (
+                float(info.get("ram_decision_mean_jet_boost_remaining", 0.0)) * frames
+            )
+            jet_boost_frames += int(info.get("ram_decision_jet_boost_frames", 0))
+            jet_boost_pickups += int(info.get("ram_decision_jet_boost_pickups", 0))
 
         finished = bool(info.get("ram_player_finished", False))
         completion = float(info.get("ram_player_completion", 0.0))
@@ -128,6 +142,11 @@ def evaluate_ram_policy(
         boost_spent_totals.append(float(boost_spent))
         boost_gained_totals.append(float(boost_gained))
         boost_active_rates.append(boost_frames / max(1, observed_frames))
+        jet_boost_remaining_values.append(
+            jet_boost_remaining_total / max(1, observed_frames)
+        )
+        jet_boost_active_rates.append(jet_boost_frames / max(1, observed_frames))
+        jet_boost_pickup_counts.append(float(jet_boost_pickups))
         for lap in lap_splits:
             split_frames = int(info.get(f"ram_player_lap_{lap}_frames", 0))
             if split_frames > 0:
@@ -150,6 +169,9 @@ def evaluate_ram_policy(
         mean_boost_spent=fmean(boost_spent_totals),
         mean_boost_gained=fmean(boost_gained_totals),
         boost_active_rate=fmean(boost_active_rates),
+        mean_jet_boost_remaining=fmean(jet_boost_remaining_values),
+        jet_boost_active_rate=fmean(jet_boost_active_rates),
+        mean_jet_boost_pickups=fmean(jet_boost_pickup_counts),
         mean_lap_1_seconds=fmean(lap_splits[1]) if lap_splits[1] else 0.0,
         mean_lap_2_seconds=fmean(lap_splits[2]) if lap_splits[2] else 0.0,
         mean_lap_3_seconds=fmean(lap_splits[3]) if lap_splits[3] else 0.0,
@@ -203,6 +225,9 @@ class RAMEvalCallback(BaseCallback):
                         "mean_boost_spent",
                         "mean_boost_gained",
                         "boost_active_rate",
+                        "mean_jet_boost_remaining",
+                        "jet_boost_active_rate",
+                        "mean_jet_boost_pickups",
                         "mean_lap_1_seconds",
                         "mean_lap_2_seconds",
                         "mean_lap_3_seconds",
@@ -233,6 +258,9 @@ class RAMEvalCallback(BaseCallback):
             "mean_boost_spent": result.mean_boost_spent,
             "mean_boost_gained": result.mean_boost_gained,
             "boost_active_rate": result.boost_active_rate,
+            "mean_jet_boost_remaining": result.mean_jet_boost_remaining,
+            "jet_boost_active_rate": result.jet_boost_active_rate,
+            "mean_jet_boost_pickups": result.mean_jet_boost_pickups,
             "mean_lap_1_seconds": result.mean_lap_1_seconds,
             "mean_lap_2_seconds": result.mean_lap_2_seconds,
             "mean_lap_3_seconds": result.mean_lap_3_seconds,
@@ -256,6 +284,7 @@ class RAMEvalCallback(BaseCallback):
                 f"lateral={result.mean_abs_lateral_offset:.3f} "
                 f"wall={result.wall_contact_rate:.1%} "
                 f"boost_spent={result.mean_boost_spent:.0f} "
+                f"jet_boost_pickups={result.mean_jet_boost_pickups:.1f} "
                 f"laps={result.mean_lap_1_seconds:.2f}/"
                 f"{result.mean_lap_2_seconds:.2f}/"
                 f"{result.mean_lap_3_seconds:.2f}s"

@@ -75,7 +75,7 @@ class RAMPlayerControlTests(unittest.TestCase):
                     states, states, tracker, slot, 1
                 )
                 self.assertEqual(len(observation), ram.DINO_RAM_OBSERVATION_SIZE)
-                self.assertEqual(ram.DINO_RAM_OBSERVATION_SIZE, 58)
+                self.assertEqual(ram.DINO_RAM_OBSERVATION_SIZE, 59)
                 self.assertEqual(len(observation), len(ram.RAM_OBSERVATION_NAMES))
                 self.assertTrue(all(-1.0 <= value <= 1.0 for value in observation))
 
@@ -100,7 +100,40 @@ class RAMPlayerControlTests(unittest.TestCase):
             "track_curvature_long",
         }
         self.assertTrue(expected.issubset(set(ram.RAM_OBSERVATION_NAMES)))
-        self.assertEqual(ram.DINO_RAM_OBSERVATION_VERSION, 3)
+        self.assertEqual(ram.DINO_RAM_OBSERVATION_VERSION, 4)
+
+    def test_jet_boost_countdown_is_symmetric_for_player_and_opponents(self):
+        memory = state_memory(self.state_path)
+        stock = npc.RaceMemory(memory)
+        timers = {0: 150, 1: 120, 2: 75, 3: 30}
+        for slot, timer in timers.items():
+            racer = stock.layout.racer(slot)
+            memory.assign(
+                racer.address + npc.RACER_POWER_UP_TYPE_OFFSET,
+                "|u1",
+                npc.JET_BOOST_POWER_UP_TYPE,
+            )
+            memory.assign(
+                racer.address + npc.RACER_POWER_UP_TIMER_OFFSET,
+                "|u1",
+                timer,
+            )
+        race = npc.RaceMemory(memory)
+        states = ram.read_racer_states(race)
+        tracker = ram.RaceProgressTracker.from_states(
+            states, ram.DINO_BONEYARD_PROGRESS_COUNT
+        )
+        jet_boost_index = ram.RAM_OBSERVATION_NAMES.index("self_jet_boost_remaining")
+
+        for slot, timer in timers.items():
+            with self.subTest(slot=slot):
+                observation = ram.build_dino_ram_observation(
+                    states, states, tracker, slot, 1
+                )
+                self.assertAlmostEqual(observation[jet_boost_index], timer / 150)
+
+        other_power_up = replace(states[0], power_up_type=2, power_up_timer=150)
+        self.assertEqual(other_power_up.jet_boost_remaining, 0)
 
     def test_boost_charge_is_symmetric_for_player_and_opponents(self):
         state_path = (

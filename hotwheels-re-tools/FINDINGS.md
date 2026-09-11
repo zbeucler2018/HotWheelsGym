@@ -106,8 +106,16 @@ Observation version 2 adds a 342-point reference line derived from median X/Z
 telemetry for all three stock CPU racers over repeated laps. Live racers are
 projected onto nearby segments. Observation version 3 gives Player 1 and every
 NPC the same 58 floats: the v2 centerline features plus each racer's normalized
-boost charge. Boost is racer-local at `+0xF0` on every bundled multiplayer
-track; Dino Boneyard has no additional power-up type to expose.
+boost charge. Observation version 4 adds a normalized handling/Jet Boost
+countdown for 59 symmetric floats. Boost is racer-local at `+0xF0` on every
+bundled multiplayer track. Jet Boost is type 3 at racer `+0x14D`; its countdown
+at `+0x14E` starts near 150 and decrements while active.
+
+The Jet Boost mapping is causal, not just correlated: moving the pickup into an
+otherwise fixed Player 1 trajectory acquired type 3 and its timer, while clearing
+either field from the same acquired state removed the handling benefit through
+the hairpin. An earlier `+0x27D` candidate was rejected because it tracks sharp
+steering/skid state rather than the power-up.
 
 A 12,000-frame native-racer replay produced a median normalized lateral error
 of 0.0023 (95th percentile 0.112), mean heading alignment of 0.938, and a local

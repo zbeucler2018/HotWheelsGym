@@ -20,6 +20,8 @@ RACER_BOOST_OFFSET = 0xF0
 RACER_X_OFFSET = 0xF8
 RACER_Z_OFFSET = 0x100
 RACER_PROGRESS_OFFSET = 0x148
+RACER_POWER_UP_TYPE_OFFSET = 0x14D
+RACER_POWER_UP_TIMER_OFFSET = 0x14E
 RACER_RESPAWN_PENDING_OFFSET = 0x26B
 RACER_PRESSED_OFFSET = 0x302
 RACER_RELEASED_OFFSET = 0x304
@@ -36,6 +38,8 @@ NPC_BUTTON_CONTROL_PATCH_VERSION = 3
 
 HEADING_PERIOD = 0x1000
 MAX_BOOST_CHARGE = 980
+JET_BOOST_POWER_UP_TYPE = 3
+MAX_JET_BOOST_TIMER = 150
 
 
 class MemoryView(Protocol):
@@ -94,6 +98,16 @@ class RacerState:
     x: int
     z: int
     boost: int = 0
+    power_up_type: int = 0xFF
+    power_up_timer: int = 0
+
+    @property
+    def jet_boost_remaining(self) -> int:
+        """Return the active Jet Boost countdown, or zero for another power-up."""
+
+        if self.power_up_type != JET_BOOST_POWER_UP_TYPE:
+            return 0
+        return min(self.power_up_timer, MAX_JET_BOOST_TIMER)
 
 
 def _read_u8(memory: MemoryView, address: int) -> int:
@@ -211,6 +225,12 @@ class RaceMemory:
             progress=_read_u16(self.memory, racer.address + RACER_PROGRESS_OFFSET),
             x=_signed_u32(_read_u32(self.memory, racer.address + RACER_X_OFFSET)),
             z=_signed_u32(_read_u32(self.memory, racer.address + RACER_Z_OFFSET)),
+            power_up_type=_read_u8(
+                self.memory, racer.address + RACER_POWER_UP_TYPE_OFFSET
+            ),
+            power_up_timer=_read_u8(
+                self.memory, racer.address + RACER_POWER_UP_TIMER_OFFSET
+            ),
         )
 
     def respawn_pending(self, slot: int) -> bool:
