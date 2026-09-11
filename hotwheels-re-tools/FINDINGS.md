@@ -111,20 +111,24 @@ countdown for 59 symmetric floats. Boost is racer-local at `+0xF0` on every
 bundled multiplayer track. Jet Boost is type 3 at racer `+0x14D`; its countdown
 at `+0x14E` starts near 150 and decrements while active.
 
+Observation version 5 adds the native binary skid/loss-of-grip state at racer
+`+0x27D`, producing 60 symmetric floats for Player 1 and player-class model
+opponents.
+
 The Jet Boost mapping is causal, not just correlated: moving the pickup into an
 otherwise fixed Player 1 trajectory acquired type 3 and its timer, while clearing
 either field from the same acquired state removed the handling benefit through
-the hairpin. An earlier `+0x27D` candidate was rejected because it tracks sharp
-steering/skid state rather than the power-up.
+the hairpin.
 
-Keep racer byte `+0x27D` as a candidate driving-state observation. It was binary
-in the traced v3 race and remained high for 113 raw frames across Dino progress
-45–55, mostly under accelerate-right at the hairpin. Forced-zero and forced-one
-interventions changed the local trajectory slightly, but they did not establish
-whether the byte means skid/grip state, sharp-steering mode, or another dependent
-condition. Do not name or expose it in the stable observation contract until
-scripted input trials and same-state branches isolate its semantics and measure
-whether it adds predictive information beyond existing kinematic features.
+Racer byte `+0x27D` is a causal native skid/loss-of-grip state. Scripted trials
+made it activate under sustained high-speed left or right steering at about 40
+heading units per physics update, while straight acceleration, coast, and braking
+left it clear. The player-physics routine clears it at `0x08103916`, sets it after
+a lateral-slip threshold at `0x081039BC`, and reads it in traction and heading
+logic at `0x0810285E` and `0x08102D2E`. With an identical 328-frame hairpin input
+sequence, the native state reached progress 66 with no wall frames; forced zero
+reached 62 with 14 wall frames, and forced one reached 56 with 26 wall frames.
+This rules out a display-only flag and justifies exposing it to the policy.
 
 A 12,000-frame native-racer replay produced a median normalized lateral error
 of 0.0023 (95th percentile 0.112), mean heading alignment of 0.938, and a local

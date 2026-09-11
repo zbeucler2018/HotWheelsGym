@@ -113,6 +113,7 @@ def _state_info(
         f"{prefix}power_up_type": state.power_up_type,
         f"{prefix}jet_boost_remaining": state.jet_boost_remaining,
         f"{prefix}jet_boost_active": state.jet_boost_remaining > 0,
+        f"{prefix}skid_active": state.skid_active,
         f"{prefix}heading": state.current_heading,
         f"{prefix}completion": progress.completion(slot, state, total_laps),
         f"{prefix}finished": finished,
@@ -332,6 +333,7 @@ class RAMActionRepeat(gym.Wrapper):
         jet_boost_remaining_total = 0.0
         jet_boost_frames = 0
         jet_boost_pickups = 0
+        skid_frames = 0
         observation: Any = None
         info: dict[str, Any] = {}
         terminated = truncated = False
@@ -350,6 +352,7 @@ class RAMActionRepeat(gym.Wrapper):
             jet_boost_remaining_total += float(info["ram_player_jet_boost_remaining"])
             jet_boost_frames += int(bool(info["ram_player_jet_boost_active"]))
             jet_boost_pickups += int(bool(info["ram_player_jet_boost_acquired"]))
+            skid_frames += int(bool(info["ram_player_skid_active"]))
             frames += 1
             if terminated or truncated:
                 break
@@ -368,6 +371,7 @@ class RAMActionRepeat(gym.Wrapper):
         )
         info["ram_decision_jet_boost_frames"] = jet_boost_frames
         info["ram_decision_jet_boost_pickups"] = jet_boost_pickups
+        info["ram_decision_skid_frames"] = skid_frames
         return observation, total_reward, terminated, truncated, info
 
 

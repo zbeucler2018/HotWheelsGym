@@ -75,7 +75,7 @@ class RAMPlayerControlTests(unittest.TestCase):
                     states, states, tracker, slot, 1
                 )
                 self.assertEqual(len(observation), ram.DINO_RAM_OBSERVATION_SIZE)
-                self.assertEqual(ram.DINO_RAM_OBSERVATION_SIZE, 59)
+                self.assertEqual(ram.DINO_RAM_OBSERVATION_SIZE, 60)
                 self.assertEqual(len(observation), len(ram.RAM_OBSERVATION_NAMES))
                 self.assertTrue(all(-1.0 <= value <= 1.0 for value in observation))
 
@@ -100,7 +100,34 @@ class RAMPlayerControlTests(unittest.TestCase):
             "track_curvature_long",
         }
         self.assertTrue(expected.issubset(set(ram.RAM_OBSERVATION_NAMES)))
-        self.assertEqual(ram.DINO_RAM_OBSERVATION_VERSION, 4)
+        self.assertEqual(ram.DINO_RAM_OBSERVATION_VERSION, 5)
+
+    def test_native_skid_state_is_symmetric_for_player_and_opponents(self):
+        memory = state_memory(self.state_path)
+        stock = npc.RaceMemory(memory)
+        active_slots = {0, 2}
+        for slot in range(4):
+            racer = stock.layout.racer(slot)
+            memory.assign(
+                racer.address + npc.RACER_SKID_ACTIVE_OFFSET,
+                "|u1",
+                int(slot in active_slots),
+            )
+        race = npc.RaceMemory(memory)
+        states = ram.read_racer_states(race)
+        tracker = ram.RaceProgressTracker.from_states(
+            states, ram.DINO_BONEYARD_PROGRESS_COUNT
+        )
+        skid_index = ram.RAM_OBSERVATION_NAMES.index("self_skid_active")
+
+        for slot in range(4):
+            with self.subTest(slot=slot):
+                observation = ram.build_dino_ram_observation(
+                    states, states, tracker, slot, 1
+                )
+                self.assertEqual(
+                    observation[skid_index], float(slot in active_slots)
+                )
 
     def test_jet_boost_countdown_is_symmetric_for_player_and_opponents(self):
         memory = state_memory(self.state_path)

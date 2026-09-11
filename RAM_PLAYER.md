@@ -65,7 +65,8 @@ raw finish frames, mean speed, rank, centerline error, heading alignment,
 wall-contact rate, respawn count, mean boost charge, boost gained/spent, and
 the fraction of emulator frames on which boost was requested while charge was
 available. It also records the mean remaining handling/Jet Boost effect,
-active-frame rate, and number of pickups. Completed-lap times appear as `mean_lap_1_seconds`,
+active-frame rate, number of pickups, and native skid-frame rate. Completed-lap
+times appear as `mean_lap_1_seconds`,
 `mean_lap_2_seconds`, and `mean_lap_3_seconds` in TensorBoard and the evaluation
 CSV.
 
@@ -74,7 +75,8 @@ deterministic start-line race using `evaluation/best_model.zip`. The MP4 plays
 at real-time speed (15 encoded frames per second for four-frame action repeat).
 Its JSON sidecar records final/mean boost charge, charge gained/spent, boost
 active frames, and handling/Jet Boost timing and pickup counts in addition to
-exact lap-split frames/seconds, race outcome, and track-quality metrics.
+native skid timing, exact lap-split frames/seconds, race outcome, and
+track-quality metrics.
 Pass `--no-record-video` only when this final recording is not wanted.
 
 ## Validated project checkpoint (2026-09-10)
@@ -118,30 +120,27 @@ training_scripts/ram_runs/dino_ram_player_boost_v3_20260910T031248Z/
     summary.json
 ```
 
-For this historical v3 checkpoint, symmetric native-button control is proven for Player 1 and
-all three model-controlled opponent slots. They receive the same racer-centric
-58-float observation and seven-action contract, while the original game owns
-physics, collision, race state, and rendering. Opponent-only respawn flashes
-are isolated so they no longer reset or blank Player 1's observation. A frozen
-model can already occupy all three opponent slots for evaluation; a learning
-self-play training run has not yet been performed.
+For this historical v3 checkpoint, symmetric native-button control is proven
+for Player 1 and all three model-controlled opponent slots. They receive the
+same racer-centric 58-float observation and seven-action contract, while the
+original game owns physics, collision, race state, and rendering. Opponent-only
+respawn flashes are isolated so they no longer reset or blank Player 1's
+observation. A frozen model can already occupy all three opponent slots for
+evaluation; a learning self-play training run has not yet been performed.
 
 Recommended continuation:
 
-1. validate racer byte `+0x27D` as a possible skid/sharp-steering state before
-   the first v4 training run; add it only if controlled tests show that it
-   exposes useful grip state rather than duplicating turn-rate telemetry;
-2. freeze the resulting observation contract, then add sector timing and record
+1. freeze the v5 observation contract, then add sector timing and record
    the progress location of missed Jet Boost pickups, walls, stalls, and
    respawns without changing the observation;
-3. train a fresh solo policy against the stock opponents, because v3
+2. train a fresh solo policy against the stock opponents, because v3
    checkpoints cannot consume the new input shape;
-4. rank checkpoints over multiple start-line races, preferring reliable
+3. rank checkpoints over multiple start-line races, preferring reliable
    zero-respawn finishes and then median finish time;
-5. perform a small portability audit on a track with different power-ups,
+4. perform a small portability audit on a track with different power-ups,
    confirming its racer-local type/timer semantics and moving any track-specific
    differences into configuration rather than duplicating the environment;
-6. introduce a frozen-checkpoint opponent pool only after the solo policy can
+5. introduce a frozen-checkpoint opponent pool only after the solo policy can
    repeat clean races near or below the pixel baseline.
 
 ## Re-evaluate a completed run
@@ -162,11 +161,11 @@ directory; videos are intentionally not encoded as TensorBoard images.
 
 ## Observation and action contract
 
-Every controlled racer—Player 1 or an opponent—gets the same 59 normalized
+Every controlled racer—Player 1 or an opponent—gets the same 60 normalized
 floats, rotated so that racer is always the observation's ego:
 
 - heading sine/cosine, absolute Dino X/Z, speed, boost charge, normalized
-  handling/Jet Boost countdown, and checkpoint phase;
+  handling/Jet Boost countdown, native skid state, and checkpoint phase;
 - tracked lap and race rank;
 - acceleration, turn rate, and progress rate;
 - signed centerline offset and heading error relative to the road;
@@ -182,7 +181,7 @@ or images are stored. Each live racer is projected onto nearby reference-line
 segments, so Player 1 and every model opponent get the same local geometry even
 when they occupy different parts of the track.
 
-This is observation contract version 4. The racer-local boost meter at `+0xF0`
+This is observation contract version 5. The racer-local boost meter at `+0xF0`
 is normalized from 0 to its maximum of 980. The same offset was verified against
 the configured Player 1 boost address on every bundled multiplayer track and
 against all four Dino racer objects. The neighboring `+0xEC` field is only a
@@ -194,29 +193,32 @@ which starts near 150 and decrements while the effect is active. The observation
 is `countdown / 150` when type 3 is equipped and zero for every other type. Moving
 the pickup into a fixed Player 1 trajectory caused both bytes to change; clearing
 either byte from that same acquired state removed the handling benefit through
-the hairpin. This distinguishes the feature from the unrelated skid/steering
-state near racer offset `+0x27D`.
+the hairpin.
 
-`+0x27D` is still worth investigating as an observation candidate. In the
-recorded v3 deterministic run it was a binary byte and stayed high for 113 raw
-frames from progress 45 through 55, predominantly while the policy held
-accelerate-right through the hairpin. Forcing it low or high altered the local
-trajectory slightly, but that experiment did not distinguish skid/grip state
-from an internal sharp-steering mode. It is deliberately excluded from v4 until
-scripted left/right/coast trials and a same-state intervention establish what it
-means and whether it adds information beyond turn rate, speed, and heading.
+Racer byte `+0x27D` is the native skid/loss-of-grip state and is exposed as the
+binary `self_skid_active` feature. Scripted high-speed left and right trials made
+it activate when heading changes reached roughly 40 units per physics update;
+it stayed off under straight acceleration, coast, and braking. Disassembly
+confirmed that player physics clears the byte each update, sets it after a
+lateral-slip threshold, and reads it in traction and heading calculations.
+Replaying identical hairpin inputs normally reached progress 66 with no wall
+frames; forcing the byte low reached 62 with 14 wall frames, while forcing it
+high reached 56 with 26 wall frames. It therefore carries causal native physics
+state rather than being only an animation flag or a duplicate power-up field.
 
-Previous 43-input v1, 54-input v2, and 58-input v3 checkpoints are intentionally incompatible:
+Previous 43-input v1, 54-input v2, 58-input v3, and 59-input v4 checkpoints are
+intentionally incompatible:
 their neural-network input layers cannot accept the new features. The tools
-detect all three formats and report a clear migration error. Train the first v4
-model from scratch; subsequent v4 checkpoints can be used symmetrically for
+detect all four formats and report a clear migration error. Train the first v5
+model from scratch; subsequent v5 checkpoints can be used symmetrically for
 self-play. Other tracks' power-up types still need a portability audit before
 their effects are added to this Dino-specific contract.
 
 The reward remains progress-dominant and finish-aware. Small shaping penalties
 now discourage wall contact, large centerline error, wrong-way alignment, and a
 new Player 1 respawn. Evaluation logs mean lateral error, heading alignment,
-wall-contact rate, and respawns alongside finish time, completion, and rank.
+wall-contact rate, native skid-frame rate, and respawns alongside finish time,
+completion, and rank.
 
 There are seven discrete actions:
 

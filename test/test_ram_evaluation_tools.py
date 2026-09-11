@@ -18,15 +18,15 @@ from training_scripts.ram_player.sweep import checkpoint_sort_key
 class RAMEvaluationToolTests(unittest.TestCase):
     def test_evaluation_aggregates_track_quality_metrics(self):
         class OneStepEnv(gym.Env):
-            observation_space = gym.spaces.Box(-1.0, 1.0, (59,), np.float32)
+            observation_space = gym.spaces.Box(-1.0, 1.0, (60,), np.float32)
             action_space = gym.spaces.Discrete(7)
 
             def reset(self, *, seed=None, options=None):
-                return np.zeros(59, dtype=np.float32), {}
+                return np.zeros(60, dtype=np.float32), {}
 
             def step(self, action):
                 return (
-                    np.zeros(59, dtype=np.float32),
+                    np.zeros(60, dtype=np.float32),
                     1.0,
                     False,
                     True,
@@ -47,6 +47,7 @@ class RAMEvaluationToolTests(unittest.TestCase):
                         "ram_decision_mean_jet_boost_remaining": 0.5,
                         "ram_decision_jet_boost_frames": 2,
                         "ram_decision_jet_boost_pickups": 1,
+                        "ram_decision_skid_frames": 3,
                         "ram_player_lap_1_frames": 4800,
                         "ram_player_lap_2_frames": 4500,
                         "ram_player_lap_3_frames": 4200,
@@ -71,6 +72,7 @@ class RAMEvaluationToolTests(unittest.TestCase):
         self.assertEqual(result.mean_jet_boost_remaining, 0.5)
         self.assertEqual(result.jet_boost_active_rate, 0.5)
         self.assertEqual(result.mean_jet_boost_pickups, 1.0)
+        self.assertEqual(result.skid_active_rate, 0.75)
         self.assertEqual(result.mean_lap_1_seconds, 80.0)
         self.assertEqual(result.mean_lap_2_seconds, 75.0)
         self.assertEqual(result.mean_lap_3_seconds, 70.0)
@@ -95,6 +97,13 @@ class RAMEvaluationToolTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "observation-v3 checkpoint"):
             validate_model_observation_space(V3Model(), "v3_model.zip")
+
+    def test_v4_ram_checkpoint_gets_clear_skid_state_migration_error(self):
+        class V4Model:
+            observation_space = type("Space", (), {"shape": (59,)})()
+
+        with self.assertRaisesRegex(ValueError, "observation-v4 checkpoint"):
+            validate_model_observation_space(V4Model(), "v4_model.zip")
 
     def test_white_respawn_frame_detection_rejects_normal_frames(self):
         normal = np.zeros((16, 16, 3), dtype=np.uint8)

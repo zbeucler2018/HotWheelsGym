@@ -87,7 +87,8 @@ def main() -> None:
             f"OK: ROM={active_rom.name} observation={observation.shape} "
             f"actions={env.action_space.n} progress={info['ram_player_progress']} "
             f"rank={info['ram_player_rank']} boost={info['ram_player_boost']} "
-            f"jet_boost={info['ram_player_jet_boost_remaining']}"
+            f"jet_boost={info['ram_player_jet_boost_remaining']} "
+            f"skid={int(info['ram_player_skid_active'])}"
         )
         for slot in opponents:
             print(
@@ -96,6 +97,7 @@ def main() -> None:
                 f"rank={int(info[f'ram_npc_{slot}_rank'])} "
                 f"boost={int(info[f'ram_npc_{slot}_boost'])} "
                 f"jet_boost={int(info[f'ram_npc_{slot}_jet_boost_remaining'])} "
+                f"skid={int(info[f'ram_npc_{slot}_skid_active'])} "
                 f"held={int(info[f'ram_npc_{slot}_buttons_held']):#05x}"
             )
         print("Preflight only: no model was created and no training was started.")

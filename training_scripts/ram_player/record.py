@@ -63,6 +63,7 @@ def record_model(
     jet_boost_remaining_total = 0.0
     jet_boost_active_frames = 0
     jet_boost_pickups = 0
+    skid_active_frames = 0
     try:
         while not (terminated or truncated):
             action, _ = model.predict(observation, deterministic=True)
@@ -82,6 +83,7 @@ def record_model(
             )
             jet_boost_active_frames += int(info.get("ram_decision_jet_boost_frames", 0))
             jet_boost_pickups += int(info.get("ram_decision_jet_boost_pickups", 0))
+            skid_active_frames += int(info.get("ram_decision_skid_frames", 0))
             encoder.write(env.render())
     finally:
         encoder.close()
@@ -113,6 +115,8 @@ def record_model(
         "jet_boost_active_frames": jet_boost_active_frames,
         "jet_boost_active_rate": (jet_boost_active_frames / max(1, observed_frames)),
         "jet_boost_pickups": jet_boost_pickups,
+        "skid_active_frames": skid_active_frames,
+        "skid_active_rate": skid_active_frames / max(1, observed_frames),
         "lap_split_frames": [
             int(info.get(f"ram_player_lap_{lap}_frames", 0)) for lap in (1, 2, 3)
         ],
@@ -147,6 +151,9 @@ def record_model(
                 ),
                 "jet_boost_pickups": int(
                     info.get(f"ram_npc_{slot}_jet_boost_pickups", 0)
+                ),
+                "skid_active": bool(
+                    info.get(f"ram_npc_{slot}_skid_active", False)
                 ),
                 "lap_split_frames": [
                     int(info.get(f"ram_npc_{slot}_lap_{lap}_frames", 0))

@@ -23,6 +23,7 @@ RACER_PROGRESS_OFFSET = 0x148
 RACER_POWER_UP_TYPE_OFFSET = 0x14D
 RACER_POWER_UP_TIMER_OFFSET = 0x14E
 RACER_RESPAWN_PENDING_OFFSET = 0x26B
+RACER_SKID_ACTIVE_OFFSET = 0x27D
 RACER_PRESSED_OFFSET = 0x302
 RACER_RELEASED_OFFSET = 0x304
 RACER_HELD_OFFSET = 0x306
@@ -100,6 +101,7 @@ class RacerState:
     boost: int = 0
     power_up_type: int = 0xFF
     power_up_timer: int = 0
+    skid_active: bool = False
 
     @property
     def jet_boost_remaining(self) -> int:
@@ -230,6 +232,9 @@ class RaceMemory:
             ),
             power_up_timer=_read_u8(
                 self.memory, racer.address + RACER_POWER_UP_TIMER_OFFSET
+            ),
+            skid_active=bool(
+                _read_u8(self.memory, racer.address + RACER_SKID_ACTIVE_OFFSET)
             ),
         )
 

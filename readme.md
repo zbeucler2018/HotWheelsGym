@@ -45,10 +45,11 @@ env = HotWheelsGym.make("HWSTC-dino_boneyard-multi-3")
 
 The repository includes native opponent control. The RAM self-play path patches
 the race manager to create four player-class racers, so model opponents receive
-the same 59-float ego-centric observation and the same seven discrete GBA button
+the same 60-float ego-centric observation and the same seven discrete GBA button
 actions as Player 1. The game still owns physics, collisions, rendering, and
 race management. On Dino Boneyard, the observation includes the racer-local
-handling/Jet Boost countdown as well as the normal boost meter.
+handling/Jet Boost countdown and native skid state as well as the normal boost
+meter.
 
 This requires a locally generated ROM patch and fresh private start-line state;
 neither is committed. See [RAM_PLAYER.md](RAM_PLAYER.md) for the proven

@@ -32,7 +32,7 @@ from .npc_control import (
 )
 
 DINO_BONEYARD_PROGRESS_COUNT = 342
-DINO_RAM_OBSERVATION_VERSION = 4
+DINO_RAM_OBSERVATION_VERSION = 5
 DINO_POSITION_CENTER = 1 << 24
 DINO_POSITION_SCALE = 1 << 24
 RELATIVE_POSITION_SCALE = 1 << 23
@@ -106,6 +106,7 @@ SELF_OBSERVATION_NAMES = (
         "self_speed",
         "self_boost_charge",
         "self_jet_boost_remaining",
+        "self_skid_active",
         "track_phase_sin",
         "track_phase_cos",
         "self_lap",
@@ -136,7 +137,7 @@ RAM_OBSERVATION_NAMES = SELF_OBSERVATION_NAMES + tuple(
     for name in OTHER_OBSERVATION_NAMES
 )
 
-SELF_OBSERVATION_SIZE = 14 + DINO_TRACK_OBSERVATION_SIZE + RAM_ACTION_SIZE
+SELF_OBSERVATION_SIZE = 15 + DINO_TRACK_OBSERVATION_SIZE + RAM_ACTION_SIZE
 OTHER_OBSERVATION_SIZE = 9
 DINO_RAM_OBSERVATION_SIZE = SELF_OBSERVATION_SIZE + 3 * OTHER_OBSERVATION_SIZE
 
@@ -383,6 +384,7 @@ def build_dino_ram_observation(
         _clip(state.speed / RAM_SPEED_SCALE, 0.0, 1.0),
         _clip(state.boost / MAX_BOOST_CHARGE, 0.0, 1.0),
         _clip(state.jet_boost_remaining / MAX_JET_BOOST_TIMER, 0.0, 1.0),
+        float(state.skid_active),
         *track_phase,
         lap_value,
         rank_value,
