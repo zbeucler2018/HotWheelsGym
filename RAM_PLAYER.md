@@ -128,16 +128,20 @@ self-play training run has not yet been performed.
 
 Recommended continuation:
 
-1. add sector timing and record the progress location of walls, stalls, and
-   respawns;
-2. resume the 3-million-step winner with smaller PPO updates and oversample the
-   slow/failure sectors before full-race fine-tuning;
-3. rank checkpoints over multiple start-line races, preferring reliable
+1. validate racer byte `+0x27D` as a possible skid/sharp-steering state before
+   the first v4 training run; add it only if controlled tests show that it
+   exposes useful grip state rather than duplicating turn-rate telemetry;
+2. freeze the resulting observation contract and train a fresh solo policy
+   against the stock opponents, because v3 checkpoints cannot consume the new
+   input shape;
+3. add sector timing and record the progress location of missed Jet Boost
+   pickups, walls, stalls, and respawns;
+4. rank checkpoints over multiple start-line races, preferring reliable
    zero-respawn finishes and then median finish time;
-4. perform a small portability audit on a track with different power-ups,
+5. perform a small portability audit on a track with different power-ups,
    confirming its racer-local type/timer semantics and moving any track-specific
    differences into configuration rather than duplicating the environment;
-5. introduce a frozen-checkpoint opponent pool only after the solo policy can
+6. introduce a frozen-checkpoint opponent pool only after the solo policy can
    repeat clean races near or below the pixel baseline.
 
 ## Re-evaluate a completed run
@@ -192,6 +196,15 @@ the pickup into a fixed Player 1 trajectory caused both bytes to change; clearin
 either byte from that same acquired state removed the handling benefit through
 the hairpin. This distinguishes the feature from the unrelated skid/steering
 state near racer offset `+0x27D`.
+
+`+0x27D` is still worth investigating as an observation candidate. In the
+recorded v3 deterministic run it was a binary byte and stayed high for 113 raw
+frames from progress 45 through 55, predominantly while the policy held
+accelerate-right through the hairpin. Forcing it low or high altered the local
+trajectory slightly, but that experiment did not distinguish skid/grip state
+from an internal sharp-steering mode. It is deliberately excluded from v4 until
+scripted left/right/coast trials and a same-state intervention establish what it
+means and whether it adds information beyond turn rate, speed, and heading.
 
 Previous 43-input v1, 54-input v2, and 58-input v3 checkpoints are intentionally incompatible:
 their neural-network input layers cannot accept the new features. The tools

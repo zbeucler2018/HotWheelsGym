@@ -117,6 +117,15 @@ either field from the same acquired state removed the handling benefit through
 the hairpin. An earlier `+0x27D` candidate was rejected because it tracks sharp
 steering/skid state rather than the power-up.
 
+Keep racer byte `+0x27D` as a candidate driving-state observation. It was binary
+in the traced v3 race and remained high for 113 raw frames across Dino progress
+45–55, mostly under accelerate-right at the hairpin. Forced-zero and forced-one
+interventions changed the local trajectory slightly, but they did not establish
+whether the byte means skid/grip state, sharp-steering mode, or another dependent
+condition. Do not name or expose it in the stable observation contract until
+scripted input trials and same-state branches isolate its semantics and measure
+whether it adds predictive information beyond existing kinematic features.
+
 A 12,000-frame native-racer replay produced a median normalized lateral error
 of 0.0023 (95th percentile 0.112), mean heading alignment of 0.938, and a local
 projection within two progress units for 95% of 35,974 racer-frame samples.
