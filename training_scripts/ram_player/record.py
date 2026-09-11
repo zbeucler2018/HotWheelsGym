@@ -117,6 +117,25 @@ def record_model(
         "jet_boost_pickups": jet_boost_pickups,
         "skid_active_frames": skid_active_frames,
         "skid_active_rate": skid_active_frames / max(1, observed_frames),
+        "hairpin": {
+            "entries": int(info.get("ram_player_hairpin_entries", 0)),
+            "completed": int(info.get("ram_player_hairpin_completed", 0)),
+            "jet_boost_entries": int(
+                info.get("ram_player_hairpin_jet_boost_entries", 0)
+            ),
+            "frames": int(info.get("ram_player_hairpin_frames", 0)),
+            "completed_frames": int(info.get("ram_player_hairpin_completed_frames", 0)),
+            "speed_total": int(info.get("ram_player_hairpin_speed_total", 0)),
+            "entry_speed_total": int(
+                info.get("ram_player_hairpin_entry_speed_total", 0)
+            ),
+            "exit_speed_total": int(info.get("ram_player_hairpin_exit_speed_total", 0)),
+            "minimum_speed_total": int(
+                info.get("ram_player_hairpin_minimum_speed_total", 0)
+            ),
+            "wall_frames": int(info.get("ram_player_hairpin_wall_frames", 0)),
+            "skid_frames": int(info.get("ram_player_hairpin_skid_frames", 0)),
+        },
         "lap_split_frames": [
             int(info.get(f"ram_player_lap_{lap}_frames", 0)) for lap in (1, 2, 3)
         ],

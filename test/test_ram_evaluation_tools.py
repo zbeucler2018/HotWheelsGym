@@ -48,6 +48,16 @@ class RAMEvaluationToolTests(unittest.TestCase):
                         "ram_decision_jet_boost_frames": 2,
                         "ram_decision_jet_boost_pickups": 1,
                         "ram_decision_skid_frames": 3,
+                        "ram_player_hairpin_entries": 3,
+                        "ram_player_hairpin_completed": 3,
+                        "ram_player_hairpin_jet_boost_entries": 2,
+                        "ram_player_hairpin_frames": 120,
+                        "ram_player_hairpin_completed_frames": 120,
+                        "ram_player_hairpin_entry_speed_total": 150_000,
+                        "ram_player_hairpin_minimum_speed_total": 90_000,
+                        "ram_player_hairpin_exit_speed_total": 135_000,
+                        "ram_player_hairpin_wall_frames": 12,
+                        "ram_player_hairpin_skid_frames": 30,
                         "ram_player_lap_1_frames": 4800,
                         "ram_player_lap_2_frames": 4500,
                         "ram_player_lap_3_frames": 4200,
@@ -73,6 +83,14 @@ class RAMEvaluationToolTests(unittest.TestCase):
         self.assertEqual(result.jet_boost_active_rate, 0.5)
         self.assertEqual(result.mean_jet_boost_pickups, 1.0)
         self.assertEqual(result.skid_active_rate, 0.75)
+        self.assertEqual(result.mean_hairpin_completions, 3.0)
+        self.assertAlmostEqual(result.mean_hairpin_seconds, 2 / 3)
+        self.assertEqual(result.mean_hairpin_entry_speed, 50_000)
+        self.assertEqual(result.mean_hairpin_minimum_speed, 30_000)
+        self.assertEqual(result.mean_hairpin_exit_speed, 45_000)
+        self.assertEqual(result.hairpin_wall_contact_rate, 0.1)
+        self.assertEqual(result.hairpin_skid_active_rate, 0.25)
+        self.assertAlmostEqual(result.hairpin_jet_boost_entry_rate, 2 / 3)
         self.assertEqual(result.mean_lap_1_seconds, 80.0)
         self.assertEqual(result.mean_lap_2_seconds, 75.0)
         self.assertEqual(result.mean_lap_3_seconds, 70.0)
@@ -83,6 +101,52 @@ class RAMEvaluationToolTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "observation-v1 checkpoint"):
             validate_model_observation_space(LegacyModel(), "old_model.zip")
+
+    def test_hairpin_means_ignore_episodes_without_a_completed_pass(self):
+        class TwoEpisodeEnv(gym.Env):
+            observation_space = gym.spaces.Box(-1.0, 1.0, (60,), np.float32)
+            action_space = gym.spaces.Discrete(7)
+
+            def __init__(self):
+                self.episode = 0
+
+            def reset(self, *, seed=None, options=None):
+                self.episode += 1
+                return np.zeros(60, dtype=np.float32), {}
+
+            def step(self, action):
+                completed = int(self.episode == 1)
+                return (
+                    np.zeros(60, dtype=np.float32),
+                    0.0,
+                    False,
+                    True,
+                    {
+                        "ram_player_speed": 0,
+                        "ram_player_finished": False,
+                        "ram_player_completion": 0.0,
+                        "ram_player_rank": 4,
+                        "ram_action_repeat_frames": 1,
+                        "ram_decision_mean_abs_lateral_offset": 0.0,
+                        "ram_decision_mean_heading_alignment": 1.0,
+                        "ram_decision_wall_frames": 0,
+                        "ram_decision_respawns": 0,
+                        "ram_player_hairpin_entries": completed,
+                        "ram_player_hairpin_completed": completed,
+                        "ram_player_hairpin_frames": 60 * completed,
+                        "ram_player_hairpin_completed_frames": 60 * completed,
+                    },
+                )
+
+        class CoastModel:
+            def predict(self, observation, deterministic=True):
+                return 0, None
+
+        result = evaluate_ram_policy(
+            CoastModel(), TwoEpisodeEnv(), 2, max_episode_frames=1
+        )
+        self.assertEqual(result.mean_hairpin_completions, 0.5)
+        self.assertEqual(result.mean_hairpin_seconds, 1.0)
 
     def test_v2_ram_checkpoint_gets_clear_boost_migration_error(self):
         class V2Model:

@@ -326,6 +326,56 @@ class RAMPlayerControlTests(unittest.TestCase):
 
         self.assertEqual(timing.padded_splits(), (5300, 5100, 4900))
 
+    def test_hairpin_tracker_records_raw_frame_speed_and_handling(self):
+        def state(progress, speed, *, jet_boost=0, skid=False):
+            return npc.RacerState(
+                slot=0,
+                vehicle_index=0,
+                current_heading=0,
+                speed=speed,
+                progress=progress,
+                x=0,
+                z=0,
+                power_up_type=npc.JET_BOOST_POWER_UP_TYPE if jet_boost else 0xFF,
+                power_up_timer=jet_boost,
+                skid_active=skid,
+            )
+
+        telemetry = ram.DinoHairpinTelemetry()
+        transitions = (
+            (state(44, 110), state(45, 100, jet_boost=145), False),
+            (state(45, 100), state(50, 80, jet_boost=140, skid=True), True),
+            (state(50, 80), state(60, 70, jet_boost=135), False),
+            (state(60, 70), state(61, 90, jet_boost=134), False),
+        )
+        for previous, current, hit_wall in transitions:
+            telemetry.update(previous, current, advance=1, hit_wall=hit_wall)
+
+        self.assertEqual(telemetry.entries, 1)
+        self.assertEqual(telemetry.completed, 1)
+        self.assertEqual(telemetry.entries_with_jet_boost, 1)
+        self.assertEqual(telemetry.frames, 3)
+        self.assertEqual(telemetry.completed_frames, 3)
+        self.assertEqual(telemetry.speed_total, 250)
+        self.assertEqual(telemetry.entry_speed_total, 100)
+        self.assertEqual(telemetry.minimum_speed_total, 70)
+        self.assertEqual(telemetry.exit_speed_total, 90)
+        self.assertEqual(telemetry.wall_frames, 1)
+        self.assertEqual(telemetry.skid_frames, 1)
+        self.assertFalse(telemetry.active)
+
+    def test_hairpin_tracker_ignores_wrong_way_boundary_crossing(self):
+        def state(progress):
+            return npc.RacerState(0, 0, 0, 100, progress, 0, 0)
+
+        telemetry = ram.DinoHairpinTelemetry()
+        telemetry.update(state(61), state(60), advance=-1, hit_wall=False)
+        telemetry.update(state(60), state(61), advance=1, hit_wall=False)
+
+        self.assertEqual(telemetry.entries, 0)
+        self.assertEqual(telemetry.completed, 0)
+        self.assertEqual(telemetry.frames, 0)
+
     def test_finished_race_reward_beats_partial_progress(self):
         partial = ram.race_reward(1, 60_000, previous_rank=2, current_rank=1)
         finished = ram.race_reward(

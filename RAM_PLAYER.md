@@ -70,6 +70,13 @@ times appear as `mean_lap_1_seconds`,
 `mean_lap_2_seconds`, and `mean_lap_3_seconds` in TensorBoard and the evaluation
 CSV.
 
+The same evaluation measures the first Dino Boneyard hairpin at raw-frame
+resolution. This diagnostic sector spans progress 45 through 60 inclusive,
+immediately after the Jet Boost pickup near progress 43. TensorBoard and the CSV
+show sector time; entry, minimum, and exit speed; wall- and skid-frame rates;
+and the fraction of entries with Jet Boost active. These are diagnostics only:
+they do not change observation v5, the reward, or checkpoint selection.
+
 After the environments close, the trainer automatically records one
 deterministic start-line race using `evaluation/best_model.zip`. The MP4 plays
 at real-time speed (15 encoded frames per second for four-frame action repeat).
@@ -130,9 +137,8 @@ evaluation; a learning self-play training run has not yet been performed.
 
 Recommended continuation:
 
-1. freeze the v5 observation contract, then add sector timing and record
-   the progress location of missed Jet Boost pickups, walls, stalls, and
-   respawns without changing the observation;
+1. use the v5 hairpin diagnostics to identify missed Jet Boost pickups, wall
+   contact, skid, and speed loss without changing the observation or reward;
 2. train a fresh solo policy against the stock opponents, because v3
    checkpoints cannot consume the new input shape;
 3. rank checkpoints over multiple start-line races, preferring reliable

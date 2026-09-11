@@ -32,6 +32,8 @@ from .npc_control import (
 )
 
 DINO_BONEYARD_PROGRESS_COUNT = 342
+DINO_HAIRPIN_START_PROGRESS = 45
+DINO_HAIRPIN_END_PROGRESS = 61
 DINO_RAM_OBSERVATION_VERSION = 5
 DINO_POSITION_CENTER = 1 << 24
 DINO_POSITION_SCALE = 1 << 24
@@ -81,6 +83,75 @@ class BoostTelemetry:
     spent: int
     gained: int
     active: bool
+
+
+@dataclass
+class DinoHairpinTelemetry:
+    """Accumulate raw-frame diagnostics for Dino Boneyard's first hairpin."""
+
+    entries: int = 0
+    completed: int = 0
+    entries_with_jet_boost: int = 0
+    frames: int = 0
+    completed_frames: int = 0
+    speed_total: int = 0
+    entry_speed_total: int = 0
+    exit_speed_total: int = 0
+    minimum_speed_total: int = 0
+    wall_frames: int = 0
+    skid_frames: int = 0
+    active: bool = False
+    _active_frames: int = 0
+    _active_minimum_speed: int | None = None
+
+    @staticmethod
+    def contains(progress: int) -> bool:
+        index = progress % DINO_BONEYARD_PROGRESS_COUNT
+        return DINO_HAIRPIN_START_PROGRESS <= index < DINO_HAIRPIN_END_PROGRESS
+
+    def update(
+        self,
+        previous: RacerState,
+        current: RacerState,
+        *,
+        advance: int,
+        hit_wall: bool,
+    ) -> None:
+        """Record one emulator-frame transition without affecting game state."""
+
+        was_inside = self.contains(previous.progress)
+        is_inside = self.contains(current.progress)
+        if not self.active and is_inside and not was_inside and advance > 0:
+            self.active = True
+            self.entries += 1
+            self.entries_with_jet_boost += int(current.jet_boost_remaining > 0)
+            self.entry_speed_total += current.speed
+            self._active_frames = 0
+            self._active_minimum_speed = None
+
+        if self.active and is_inside:
+            self.frames += 1
+            self.speed_total += current.speed
+            self.wall_frames += int(hit_wall)
+            self.skid_frames += int(current.skid_active)
+            self._active_frames += 1
+            if self._active_minimum_speed is None:
+                self._active_minimum_speed = current.speed
+            else:
+                self._active_minimum_speed = min(
+                    self._active_minimum_speed, current.speed
+                )
+
+        if self.active and was_inside and not is_inside:
+            current_index = current.progress % DINO_BONEYARD_PROGRESS_COUNT
+            if advance > 0 and current_index >= DINO_HAIRPIN_END_PROGRESS:
+                self.completed += 1
+                self.completed_frames += self._active_frames
+                self.exit_speed_total += current.speed
+                self.minimum_speed_total += self._active_minimum_speed or 0
+            self.active = False
+            self._active_frames = 0
+            self._active_minimum_speed = None
 
 
 RAM_ACTIONS = (

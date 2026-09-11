@@ -33,6 +33,14 @@ class RAMEvaluation:
     jet_boost_active_rate: float
     mean_jet_boost_pickups: float
     skid_active_rate: float
+    mean_hairpin_completions: float
+    mean_hairpin_seconds: float
+    mean_hairpin_entry_speed: float
+    mean_hairpin_minimum_speed: float
+    mean_hairpin_exit_speed: float
+    hairpin_wall_contact_rate: float
+    hairpin_skid_active_rate: float
+    hairpin_jet_boost_entry_rate: float
     mean_lap_1_seconds: float
     mean_lap_2_seconds: float
     mean_lap_3_seconds: float
@@ -69,6 +77,17 @@ def evaluate_ram_policy(
     jet_boost_active_rates: list[float] = []
     jet_boost_pickup_counts: list[float] = []
     skid_active_rates: list[float] = []
+    hairpin_completions: list[float] = []
+    hairpin_entries = 0
+    hairpin_completed = 0
+    hairpin_jet_boost_entries = 0
+    hairpin_frames = 0
+    hairpin_completed_frames = 0
+    hairpin_entry_speed_total = 0.0
+    hairpin_minimum_speed_total = 0.0
+    hairpin_exit_speed_total = 0.0
+    hairpin_wall_frames = 0
+    hairpin_skid_frames = 0
     lap_splits: dict[int, list[float]] = {lap: [] for lap in (1, 2, 3)}
     scores: list[float] = []
 
@@ -152,6 +171,28 @@ def evaluate_ram_policy(
         jet_boost_active_rates.append(jet_boost_frames / max(1, observed_frames))
         jet_boost_pickup_counts.append(float(jet_boost_pickups))
         skid_active_rates.append(skid_frames / max(1, observed_frames))
+        episode_hairpin_completed = int(info.get("ram_player_hairpin_completed", 0))
+        hairpin_completions.append(float(episode_hairpin_completed))
+        hairpin_entries += int(info.get("ram_player_hairpin_entries", 0))
+        hairpin_completed += episode_hairpin_completed
+        hairpin_jet_boost_entries += int(
+            info.get("ram_player_hairpin_jet_boost_entries", 0)
+        )
+        hairpin_frames += int(info.get("ram_player_hairpin_frames", 0))
+        hairpin_completed_frames += int(
+            info.get("ram_player_hairpin_completed_frames", 0)
+        )
+        hairpin_entry_speed_total += float(
+            info.get("ram_player_hairpin_entry_speed_total", 0)
+        )
+        hairpin_minimum_speed_total += float(
+            info.get("ram_player_hairpin_minimum_speed_total", 0)
+        )
+        hairpin_exit_speed_total += float(
+            info.get("ram_player_hairpin_exit_speed_total", 0)
+        )
+        hairpin_wall_frames += int(info.get("ram_player_hairpin_wall_frames", 0))
+        hairpin_skid_frames += int(info.get("ram_player_hairpin_skid_frames", 0))
         for lap in lap_splits:
             split_frames = int(info.get(f"ram_player_lap_{lap}_frames", 0))
             if split_frames > 0:
@@ -178,6 +219,20 @@ def evaluate_ram_policy(
         jet_boost_active_rate=fmean(jet_boost_active_rates),
         mean_jet_boost_pickups=fmean(jet_boost_pickup_counts),
         skid_active_rate=fmean(skid_active_rates),
+        mean_hairpin_completions=fmean(hairpin_completions),
+        mean_hairpin_seconds=(
+            hairpin_completed_frames / max(1, hairpin_completed) / 60.0
+        ),
+        mean_hairpin_entry_speed=(hairpin_entry_speed_total / max(1, hairpin_entries)),
+        mean_hairpin_minimum_speed=(
+            hairpin_minimum_speed_total / max(1, hairpin_completed)
+        ),
+        mean_hairpin_exit_speed=(hairpin_exit_speed_total / max(1, hairpin_completed)),
+        hairpin_wall_contact_rate=hairpin_wall_frames / max(1, hairpin_frames),
+        hairpin_skid_active_rate=hairpin_skid_frames / max(1, hairpin_frames),
+        hairpin_jet_boost_entry_rate=(
+            hairpin_jet_boost_entries / max(1, hairpin_entries)
+        ),
         mean_lap_1_seconds=fmean(lap_splits[1]) if lap_splits[1] else 0.0,
         mean_lap_2_seconds=fmean(lap_splits[2]) if lap_splits[2] else 0.0,
         mean_lap_3_seconds=fmean(lap_splits[3]) if lap_splits[3] else 0.0,
@@ -235,6 +290,14 @@ class RAMEvalCallback(BaseCallback):
                         "jet_boost_active_rate",
                         "mean_jet_boost_pickups",
                         "skid_active_rate",
+                        "mean_hairpin_completions",
+                        "mean_hairpin_seconds",
+                        "mean_hairpin_entry_speed",
+                        "mean_hairpin_minimum_speed",
+                        "mean_hairpin_exit_speed",
+                        "hairpin_wall_contact_rate",
+                        "hairpin_skid_active_rate",
+                        "hairpin_jet_boost_entry_rate",
                         "mean_lap_1_seconds",
                         "mean_lap_2_seconds",
                         "mean_lap_3_seconds",
@@ -269,6 +332,14 @@ class RAMEvalCallback(BaseCallback):
             "jet_boost_active_rate": result.jet_boost_active_rate,
             "mean_jet_boost_pickups": result.mean_jet_boost_pickups,
             "skid_active_rate": result.skid_active_rate,
+            "mean_hairpin_completions": result.mean_hairpin_completions,
+            "mean_hairpin_seconds": result.mean_hairpin_seconds,
+            "mean_hairpin_entry_speed": result.mean_hairpin_entry_speed,
+            "mean_hairpin_minimum_speed": result.mean_hairpin_minimum_speed,
+            "mean_hairpin_exit_speed": result.mean_hairpin_exit_speed,
+            "hairpin_wall_contact_rate": result.hairpin_wall_contact_rate,
+            "hairpin_skid_active_rate": result.hairpin_skid_active_rate,
+            "hairpin_jet_boost_entry_rate": result.hairpin_jet_boost_entry_rate,
             "mean_lap_1_seconds": result.mean_lap_1_seconds,
             "mean_lap_2_seconds": result.mean_lap_2_seconds,
             "mean_lap_3_seconds": result.mean_lap_3_seconds,
@@ -294,6 +365,8 @@ class RAMEvalCallback(BaseCallback):
                 f"boost_spent={result.mean_boost_spent:.0f} "
                 f"jet_boost_pickups={result.mean_jet_boost_pickups:.1f} "
                 f"skid={result.skid_active_rate:.1%} "
+                f"hairpin={result.mean_hairpin_seconds:.2f}s "
+                f"hairpin_boost={result.hairpin_jet_boost_entry_rate:.0%} "
                 f"laps={result.mean_lap_1_seconds:.2f}/"
                 f"{result.mean_lap_2_seconds:.2f}/"
                 f"{result.mean_lap_3_seconds:.2f}s"

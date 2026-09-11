@@ -22,6 +22,7 @@ from .npc_control import (
 from .ram_opponent_control import (
     DINO_BONEYARD_PROGRESS_COUNT,
     DINO_RAM_OBSERVATION_SIZE,
+    DinoHairpinTelemetry,
     LapSplitTracker,
     RAM_ACTION_SIZE,
     RaceProgressTracker,
@@ -128,6 +129,23 @@ def _lap_split_info(prefix: str, timing: LapSplitTracker) -> dict[str, int]:
     }
 
 
+def _hairpin_info(telemetry: DinoHairpinTelemetry) -> dict[str, Any]:
+    return {
+        "ram_player_hairpin_entries": telemetry.entries,
+        "ram_player_hairpin_completed": telemetry.completed,
+        "ram_player_hairpin_jet_boost_entries": telemetry.entries_with_jet_boost,
+        "ram_player_hairpin_frames": telemetry.frames,
+        "ram_player_hairpin_completed_frames": telemetry.completed_frames,
+        "ram_player_hairpin_speed_total": telemetry.speed_total,
+        "ram_player_hairpin_entry_speed_total": telemetry.entry_speed_total,
+        "ram_player_hairpin_exit_speed_total": telemetry.exit_speed_total,
+        "ram_player_hairpin_minimum_speed_total": telemetry.minimum_speed_total,
+        "ram_player_hairpin_wall_frames": telemetry.wall_frames,
+        "ram_player_hairpin_skid_frames": telemetry.skid_frames,
+        "ram_player_hairpin_active": telemetry.active,
+    }
+
+
 class DinoRAMPlayerEnv(gym.Wrapper):
     """Train Player 1 from racer-centric RAM instead of framebuffer pixels."""
 
@@ -145,6 +163,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         self._lap_timing: LapSplitTracker | None = None
         self._player_respawn_pending = False
         self._jet_boost_pickups = 0
+        self._hairpin = DinoHairpinTelemetry()
         self.action_space = gym.spaces.Discrete(RAM_ACTION_SIZE)
         self.observation_space = gym.spaces.Box(
             low=-1.0,
@@ -192,6 +211,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         )
         self._player_respawn_pending = self._race.respawn_pending(0)
         self._jet_boost_pickups = 0
+        self._hairpin = DinoHairpinTelemetry()
         info.update(
             _state_info(
                 "ram_player_",
@@ -204,6 +224,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
             )
         )
         info.update(_lap_split_info("ram_player_", self._lap_timing))
+        info.update(_hairpin_info(self._hairpin))
         track = dino_track_pose(self._states[0])
         info["ram_player_track_index"] = track.progress_index
         info["ram_player_lateral_offset"] = track.lateral_offset
@@ -267,6 +288,12 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         boost = boost_telemetry(previous.boost, current.boost, action_index)
         jet_boost_acquired = current.jet_boost_remaining > previous.jet_boost_remaining
         self._jet_boost_pickups += int(jet_boost_acquired)
+        self._hairpin.update(
+            previous,
+            current,
+            advance=advance,
+            hit_wall=hit_wall,
+        )
         reward = race_reward(
             advance,
             current.speed,
@@ -308,6 +335,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         info["ram_player_boost_active"] = boost.active
         info["ram_player_jet_boost_acquired"] = jet_boost_acquired
         info["ram_player_jet_boost_pickups"] = self._jet_boost_pickups
+        info.update(_hairpin_info(self._hairpin))
         return self._observation(), reward, terminated, truncated, info
 
 
