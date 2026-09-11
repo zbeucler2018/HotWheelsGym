@@ -1,9 +1,8 @@
 # Reverse-engineering findings
 
 Status: static, savestate, and headless mGBA analysis reproduced beginning on
-2026-09-07. The desired-heading boundary, selected-CPU hook, and symmetric
-native-button opponent path have been dynamically validated. The older
-mirror-control experiment remains separate from the production-facing patch.
+2026-09-07. The symmetric native-button opponent path has been dynamically
+validated and is the only supported model-opponent control interface.
 
 ## ROM identity
 
@@ -115,50 +114,6 @@ of 0.0023 (95th percentile 0.112), mean heading alignment of 0.938, and a local
 projection within two progress units for 95% of 35,974 racer-frame samples.
 The reference table stores only coordinates—no ROM bytes or imagery.
 
-## Stock CPU command boundary
-
-The CPU slot-four update at `0x080F6C2C` has a compact steering boundary:
-
-| Offset | Width | Meaning |
-|---:|---:|---|
-| `+0xDE` | 16 bits | current heading (12-bit circle) |
-| `+0xE0` | 16 bits | desired heading (12-bit circle) |
-| `+0xE8` | 32 bits | current fixed-point speed |
-| `+0x2F0` | 32 bits | target fixed-point speed |
-
-At `0x080F7112`, the stock AI calculates a heading to its current waypoint. The
-store at `0x080F7116` writes that result to racer `+0xE0`. Later in the same
-update, `0x08108E94` calculates the bounded turn from `+0xDE` toward `+0xE0`;
-the updated current heading drives the velocity-vector calculation.
-
-The `patch-external-cpu-heading` probe NOPs only the store at `0x080F7116`, so
-an emulator-side controller can own `+0xE0`. From generated Dino Boneyard state
-104, a 120-frame headless mGBA comparison produced:
-
-| Run | CPU 1 progress | heading | x | z |
-|---|---:|---:|---:|---:|
-| stock AI | 107 -> 113 | `0x641` -> `0x6EF` | 5,456,220 -> 6,251,826 | 6,970,483 -> 5,928,424 |
-| forced `+0xE0 = 0x680` | 107 -> 110 | `0x641` -> `0x673` | 5,456,220 -> 6,015,519 | 6,970,483 -> 6,199,021 |
-
-This proves that `+0xE0` is an effective steering-command input rather than
-merely telemetry. The one-instruction probe suppresses the desired-heading
-write for every CPU, so it is not yet the final selected-slot hook.
-
-The production-facing `patch-npc-control` hook checks the CPU racer's vehicle
-index and suppresses the store only for a generated bitmask of indices 1..3.
-For controlled racers it writes the stock computed heading to the otherwise
-zero padding field at `+0x2EE`, making the native waypoint target available to
-the Gym observation. In a 120-frame mGBA test with vehicle 1 selected and held
-at heading `0x680`, slot 1 followed the external heading while slots 2 and 3
-continued to update their stock desired headings and progress normally.
-
-`+0x2F0` is also a live speed command and does not need the heading-store patch.
-In the same 120-frame test, CPU 1's stock target of 59,904 yielded current speed
-59,889 and progress 113. Holding the target at 30,000 yielded current speed
-33,689 and progress 110; holding it at zero yielded current speed 3,630 and
-progress 109. The native update smoothly approaches the supplied target while
-retaining the rest of the CPU racer's physics.
-
 ## Player-class opponent respawns
 
 The native-button patch makes each opponent a player-class racer, so a failed
@@ -196,36 +151,12 @@ The historical state header is mGBA format `0x01000002` with HLE BIOS checksum
 `0x5A262303`. These states were captured inside the old HLE BIOS IRQ trampoline
 (`PC=0x0000001C`, IRQ-mode CPSR). Letting the new HLE BIOS resume that old
 trampoline corrupts execution. For reverse-engineering experiments, the native
-probe's `--resume-old-hle` option skips the one pending IRQ return by restoring
-`CPSR=SPSR` and `PC=LR-4`; the race then advances and renders correctly. This is
-a compatibility workaround, not a general savestate converter.
-
-## Experimental deterministic patch
-
-The `patch-mirror-cpu` command changes both CPU construction paths:
-
-| Address | Original | Patched | Purpose |
-|---:|---|---|---|
-| `0x080FBAA2` | `movs r1, #0xC0` | `movs r1, #0xDA` | allocation: `0x300` to `0x368` |
-| `0x080FBAB8` | `bl 0x080F5888` | `bl 0x08101618` | use player constructor |
-| `0x080FC03A` | `movs r1, #0xC0` | `movs r1, #0xDA` | second allocation path |
-| `0x080FC050` | `bl 0x080F5888` | `bl 0x08101618` | second constructor path |
-
-Expected behavior: CPU slots become player-racer instances, remain in the same
-manager pointer array, and consume Player 1's normal control state. This should
-produce a visible mirror-control proof while retaining the native racer update,
-physics, collision, and race manager. Dynamic testing is required; code that
-assumes CPU-specific fields or vtable behavior may expose an incompatibility.
+probe skipped the one pending IRQ return by restoring `CPSR=SPSR` and
+`PC=LR-4`; the race then advanced and rendered correctly. This was a diagnostic
+compatibility workaround, not a general savestate converter or supported tool.
 
 ## Open issues
 
-- The CPU-to-player-class mirror patch has not yet been validated from a cold
-  race start in mGBA or Stable-Retro.
-- The selected-CPU hook has been tested from a resumed historical race state,
-  but still needs a cold-start Stable-Retro soak test on every track.
-- The current NPC observation/reward is a first training contract and may need
-  additional collision or lap telemetry after initial PPO experiments.
-- The old-HLE IRQ recovery intentionally skips one interrupt handler invocation;
-  use the original Stable-Retro 0.9.2-era core for production-faithful playback.
-- A pixel policy still sees the human camera, so model-correct observation is a
-  separate milestone after deterministic control.
+- The native-button patch still needs a cold-start Stable-Retro soak test on
+  tracks beyond Dino Boneyard.
+- Additional tracks need track-relative geometry and power-up observations.

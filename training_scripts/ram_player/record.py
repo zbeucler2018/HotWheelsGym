@@ -46,8 +46,6 @@ def record_model(
         max_episode_steps=evaluation_episode_steps(config),
         seed=int(config["seed"]) + 30_000,
         opponent_paths=opponent_paths,
-        opponent_max_turn=int(config["opponent_max_turn"]),
-        opponent_max_target_speed=int(config["opponent_max_target_speed"]),
         state_path=(str(opponent_state_path(config)) if opponent_paths else None),
     )
     model = PPO.load(model_path, device=device)
@@ -100,12 +98,10 @@ def record_model(
         "boost_active_frames": boost_active_frames,
         "boost_active_rate": boost_active_frames / max(1, observed_frames),
         "lap_split_frames": [
-            int(info.get(f"ram_player_lap_{lap}_frames", 0))
-            for lap in (1, 2, 3)
+            int(info.get(f"ram_player_lap_{lap}_frames", 0)) for lap in (1, 2, 3)
         ],
         "lap_split_seconds": [
-            int(info.get(f"ram_player_lap_{lap}_frames", 0)) / 60.0
-            for lap in (1, 2, 3)
+            int(info.get(f"ram_player_lap_{lap}_frames", 0)) / 60.0 for lap in (1, 2, 3)
         ],
         "lateral_offset": float(info.get("ram_player_lateral_offset", 0.0)),
         "heading_alignment": float(info.get("ram_player_heading_alignment", 0.0)),

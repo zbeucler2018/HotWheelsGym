@@ -136,8 +136,6 @@ def main() -> None:
                 max_episode_steps=int(config["max_episode_steps"]),
                 seed=int(config["seed"]) + index,
                 opponent_paths=opponent_paths,
-                opponent_max_turn=int(config["opponent_max_turn"]),
-                opponent_max_target_speed=int(config["opponent_max_target_speed"]),
                 state_path=str(state) if state else None,
                 monitor_path=str(run_dir / "monitor" / f"worker_{index}"),
             )
@@ -161,8 +159,6 @@ def main() -> None:
             max_episode_steps=evaluation_episode_steps(config),
             seed=int(config["seed"]) + 10_000,
             opponent_paths=opponent_paths,
-            opponent_max_turn=int(config["opponent_max_turn"]),
-            opponent_max_target_speed=int(config["opponent_max_target_speed"]),
             state_path=str(states[0]) if opponents else None,
         )
         try:

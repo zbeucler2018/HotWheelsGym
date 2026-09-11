@@ -1,12 +1,11 @@
-"""ROM-independent memory model for controlling native CPU racers."""
+"""ROM-independent discovery and telemetry for active race objects."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import cos, isfinite, pi, sin
 from pathlib import Path
 import struct
-from typing import Mapping, Protocol, Sequence
+from typing import Mapping, Protocol
 
 EWRAM_BASE = 0x02000000
 EWRAM_SIZE = 0x40000
@@ -16,16 +15,12 @@ CPU_RACER_VTABLE = 0x0817B6D4
 RACER_MANAGER_OFFSET = 0x50
 RACER_VEHICLE_INDEX_OFFSET = 0xDC
 RACER_CURRENT_HEADING_OFFSET = 0xDE
-RACER_STEERING_HEADING_OFFSET = 0xD8
-RACER_DESIRED_HEADING_OFFSET = 0xE0
 RACER_SPEED_OFFSET = 0xE8
 RACER_BOOST_OFFSET = 0xF0
 RACER_X_OFFSET = 0xF8
 RACER_Z_OFFSET = 0x100
 RACER_PROGRESS_OFFSET = 0x148
 RACER_RESPAWN_PENDING_OFFSET = 0x26B
-RACER_STOCK_HEADING_SHADOW_OFFSET = 0x2EE
-RACER_TARGET_SPEED_OFFSET = 0x2F0
 RACER_PRESSED_OFFSET = 0x302
 RACER_RELEASED_OFFSET = 0x304
 RACER_HELD_OFFSET = 0x306
@@ -35,33 +30,12 @@ MANAGER_CPU_COUNT_OFFSET = 0x449
 MANAGER_TOTAL_COUNT_OFFSET = 0x44A
 MANAGER_POINTER_LIST_OFFSET = 0x450
 
-NPC_CONTROL_MARKER_OFFSET = 0x79BF08
-NPC_CONTROL_MARKER = b"HWNP"
-NPC_CONTROL_PATCH_VERSION = 1
 NPC_BUTTON_CONTROL_MARKER_OFFSET = 0x79BEF4
 NPC_BUTTON_CONTROL_MARKER = b"HWBT"
 NPC_BUTTON_CONTROL_PATCH_VERSION = 3
 
 HEADING_PERIOD = 0x1000
-DEFAULT_MAX_TURN = 0x200
-DEFAULT_MAX_TARGET_SPEED = 0x12000
 MAX_BOOST_CHARGE = 980
-OBSERVATION_SIZE = 12
-
-TRACK_PROGRESS_COUNTS = {
-    "trex_valley": 316,
-    "dino_boneyard": 342,
-    "black_widows_nest": 395,
-    "insect_hive": 380,
-    "monsters_of_the_deep": 342,
-    "whiteskull_cliffs": 340,
-    "jungle_snakepit": 465,
-    "gator_forest": 512,
-    "satellite_mission": 376,
-    "solar_strip": 325,
-    "fire_mountain": 465,
-    "volcano_battle": 495,
-}
 
 
 class MemoryView(Protocol):
@@ -101,12 +75,6 @@ class RaceLayout:
             raise RuntimeError("racer table slot ordering is inconsistent")
         return racer
 
-    def cpu(self, slot: int) -> RacerRef:
-        racer = self.racer(slot)
-        if racer.kind != "cpu":
-            raise ValueError(f"racer slot {slot} is {racer.kind}, not a native CPU")
-        return racer
-
     def opponent(self, slot: int) -> RacerRef:
         """Return a non-Player-1 racer, including a converted player-class NPC."""
 
@@ -121,21 +89,11 @@ class RacerState:
     slot: int
     vehicle_index: int
     current_heading: int
-    desired_heading: int
-    stock_heading: int
     speed: int
-    target_speed: int
     progress: int
     x: int
     z: int
-    rank: int
     boost: int = 0
-
-
-@dataclass(frozen=True)
-class NPCCommand:
-    desired_heading: int
-    target_speed: int
 
 
 def _read_u8(memory: MemoryView, address: int) -> int:
@@ -233,7 +191,7 @@ def discover_race_layout(memory: MemoryView) -> RaceLayout:
 
 
 class RaceMemory:
-    """Read observations and write commands through a discovered race layout."""
+    """Read racer telemetry through a discovered race layout."""
 
     def __init__(self, memory: MemoryView):
         self.memory = memory
@@ -241,16 +199,6 @@ class RaceMemory:
 
     def state(self, slot: int) -> RacerState:
         racer = self.layout.racer(slot)
-        states = []
-        for other in self.layout.racers:
-            states.append(
-                (
-                    other,
-                    _read_u16(self.memory, other.address + RACER_PROGRESS_OFFSET),
-                )
-            )
-        progress = next(value for other, value in states if other.slot == slot)
-        rank = 1 + sum(value > progress for _, value in states)
         return RacerState(
             slot=slot,
             vehicle_index=racer.vehicle_index,
@@ -258,23 +206,11 @@ class RaceMemory:
                 self.memory, racer.address + RACER_CURRENT_HEADING_OFFSET
             )
             & (HEADING_PERIOD - 1),
-            desired_heading=_read_u16(
-                self.memory, racer.address + RACER_DESIRED_HEADING_OFFSET
-            )
-            & (HEADING_PERIOD - 1),
-            stock_heading=_read_u16(
-                self.memory, racer.address + RACER_STOCK_HEADING_SHADOW_OFFSET
-            )
-            & (HEADING_PERIOD - 1),
             speed=_read_u32(self.memory, racer.address + RACER_SPEED_OFFSET),
             boost=_read_u32(self.memory, racer.address + RACER_BOOST_OFFSET),
-            target_speed=_read_u32(
-                self.memory, racer.address + RACER_TARGET_SPEED_OFFSET
-            ),
-            progress=progress,
+            progress=_read_u16(self.memory, racer.address + RACER_PROGRESS_OFFSET),
             x=_signed_u32(_read_u32(self.memory, racer.address + RACER_X_OFFSET)),
             z=_signed_u32(_read_u32(self.memory, racer.address + RACER_Z_OFFSET)),
-            rank=rank,
         )
 
     def respawn_pending(self, slot: int) -> bool:
@@ -285,111 +221,11 @@ class RaceMemory:
             return False
         return bool(_read_u8(self.memory, racer.address + RACER_RESPAWN_PENDING_OFFSET))
 
-    def command(
-        self,
-        slot: int,
-        action: Sequence[float],
-        *,
-        max_turn: int = DEFAULT_MAX_TURN,
-        max_target_speed: int = DEFAULT_MAX_TARGET_SPEED,
-    ) -> NPCCommand:
-        racer = self.layout.cpu(slot)
-        state = self.state(slot)
-        command = command_from_action(
-            state,
-            action,
-            max_turn=max_turn,
-            max_target_speed=max_target_speed,
-        )
-        self.memory.assign(
-            racer.address + RACER_DESIRED_HEADING_OFFSET,
-            "<u2",
-            command.desired_heading,
-        )
-        self.memory.assign(
-            racer.address + RACER_TARGET_SPEED_OFFSET,
-            "<u4",
-            command.target_speed,
-        )
-        return command
-
-    def prime_stock_heading(self, slot: int) -> None:
-        """Seed the patch-owned observation field from the savestate heading."""
-
-        racer = self.layout.cpu(slot)
-        desired = _read_u16(self.memory, racer.address + RACER_DESIRED_HEADING_OFFSET)
-        self.memory.assign(
-            racer.address + RACER_STOCK_HEADING_SHADOW_OFFSET,
-            "<u2",
-            desired & (HEADING_PERIOD - 1),
-        )
-
-    def observation(
-        self,
-        slot: int,
-        progress_count: int,
-        *,
-        max_target_speed: int = DEFAULT_MAX_TARGET_SPEED,
-    ) -> tuple[float, ...]:
-        state = self.state(slot)
-        player = self.state(0)
-        angle = 2.0 * pi * state.current_heading / HEADING_PERIOD
-        stock_angle = 2.0 * pi * state.stock_heading / HEADING_PERIOD
-        scale = float(max(1, max_target_speed))
-        count = float(max(1, progress_count))
-        features = (
-            sin(angle),
-            cos(angle),
-            sin(stock_angle),
-            cos(stock_angle),
-            _clip(state.speed / scale, -1.0, 1.0),
-            _clip(state.target_speed / scale, 0.0, 1.0),
-            _clip(state.progress / count, 0.0, 1.0),
-            _clip((player.progress - state.progress) / count, -1.0, 1.0),
-            _clip((player.x - state.x) / (1 << 22), -1.0, 1.0),
-            _clip((player.z - state.z) / (1 << 22), -1.0, 1.0),
-            _clip((state.rank - 1) / max(1, len(self.layout.racers) - 1), 0.0, 1.0),
-            _clip(
-                heading_delta(state.desired_heading, state.current_heading) / 0x800,
-                -1.0,
-                1.0,
-            ),
-        )
-        return features
-
-
-def _clip(value: float, low: float, high: float) -> float:
-    return max(low, min(high, value))
-
 
 def heading_delta(target: int, current: int) -> int:
     """Return the shortest signed distance on the game's 12-bit heading circle."""
 
     return ((target - current + 0x800) & (HEADING_PERIOD - 1)) - 0x800
-
-
-def command_from_action(
-    state: RacerState,
-    action: Sequence[float],
-    *,
-    max_turn: int = DEFAULT_MAX_TURN,
-    max_target_speed: int = DEFAULT_MAX_TARGET_SPEED,
-) -> NPCCommand:
-    if not 0 <= max_turn <= 0x800:
-        raise ValueError("max_turn must be between 0 and 0x800")
-    if not 0 < max_target_speed <= 0xFFFFFFFF:
-        raise ValueError("max_target_speed must fit in an unsigned 32-bit value")
-    if len(action) != 2:
-        raise ValueError("NPC action must contain [steering, throttle]")
-    steering, throttle = float(action[0]), float(action[1])
-    if not isfinite(steering) or not isfinite(throttle):
-        raise ValueError("NPC action values must be finite")
-    steering = _clip(steering, -1.0, 1.0)
-    throttle = _clip(throttle, 0.0, 1.0)
-    desired_heading = (state.current_heading + round(steering * max_turn)) & (
-        HEADING_PERIOD - 1
-    )
-    return NPCCommand(desired_heading, round(throttle * max_target_speed))
 
 
 def progress_delta(previous: int, current: int, progress_count: int) -> int:
@@ -402,22 +238,6 @@ def progress_delta(previous: int, current: int, progress_count: int) -> int:
     elif delta > halfway:
         delta -= progress_count
     return delta
-
-
-def controlled_vehicle_indices_from_rom(path: Path) -> tuple[int, ...]:
-    """Read the selected vehicle mask embedded by ``patch-npc-control``."""
-
-    with path.open("rb") as handle:
-        handle.seek(NPC_CONTROL_MARKER_OFFSET)
-        marker = handle.read(8)
-    if marker[:4] != NPC_CONTROL_MARKER:
-        return ()
-    if len(marker) != 8 or marker[4] != NPC_CONTROL_PATCH_VERSION:
-        raise ValueError("unsupported NPC-control ROM patch marker")
-    mask = marker[5]
-    if mask & ~0x0E:
-        raise ValueError(f"invalid NPC-control vehicle mask: {mask:#x}")
-    return tuple(index for index in (1, 2, 3) if mask & (1 << index))
 
 
 def button_controlled_vehicle_indices_from_rom(path: Path) -> tuple[int, ...]:

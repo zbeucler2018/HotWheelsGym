@@ -1,7 +1,7 @@
 """Pure contracts shared by the Player 1 RAM policy and model opponents.
 
 The policy sees the same racer-relative observation and emits the same discrete
-driving intent whether it occupies Player 1 or a patched native CPU slot. This
+button action whether it occupies Player 1 or a converted player-class slot. This
 module deliberately has no Gymnasium, Stable-Retro, NumPy, or PyTorch imports.
 """
 
@@ -19,16 +19,11 @@ from .dino_boneyard_track import (
     dino_track_pose,
 )
 from .npc_control import (
-    DEFAULT_MAX_TARGET_SPEED,
-    DEFAULT_MAX_TURN,
     HEADING_PERIOD,
     MAX_BOOST_CHARGE,
-    NPCCommand,
     RACER_HELD_OFFSET,
     RACER_PRESSED_OFFSET,
     RACER_RELEASED_OFFSET,
-    RACER_DESIRED_HEADING_OFFSET,
-    RACER_TARGET_SPEED_OFFSET,
     RaceMemory,
     RacerState,
     heading_delta,
@@ -41,6 +36,7 @@ DINO_POSITION_CENTER = 1 << 24
 DINO_POSITION_SCALE = 1 << 24
 RELATIVE_POSITION_SCALE = 1 << 23
 SPEED_DELTA_SCALE = 1 << 13
+RAM_SPEED_SCALE = 0x12000
 
 GBA_BUTTON_BITS = {
     "A": 0x001,
@@ -61,12 +57,10 @@ if DINO_TRACK_POINT_COUNT != DINO_BONEYARD_PROGRESS_COUNT:
 
 @dataclass(frozen=True)
 class RacerAction:
-    """One shared policy action and its Player/CPU interpretations."""
+    """One shared policy action and its native GBA buttons."""
 
     name: str
     buttons: tuple[str, ...]
-    steering: int
-    throttle: int
 
 
 @dataclass(frozen=True)
@@ -89,13 +83,13 @@ class BoostTelemetry:
 
 
 RAM_ACTIONS = (
-    RacerAction("coast", (), 0, 0),
-    RacerAction("accelerate", ("A",), 0, 1),
-    RacerAction("accelerate_left", ("A", "LEFT"), -1, 1),
-    RacerAction("accelerate_right", ("A", "RIGHT"), 1, 1),
-    RacerAction("brake", ("B",), 0, 0),
-    RacerAction("accelerate_up", ("A", "UP"), 0, 1),
-    RacerAction("boost", ("A", "L", "R"), 0, 1),
+    RacerAction("coast", ()),
+    RacerAction("accelerate", ("A",)),
+    RacerAction("accelerate_left", ("A", "LEFT")),
+    RacerAction("accelerate_right", ("A", "RIGHT")),
+    RacerAction("brake", ("B",)),
+    RacerAction("accelerate_up", ("A", "UP")),
+    RacerAction("boost", ("A", "L", "R")),
 )
 RAM_ACTION_SIZE = len(RAM_ACTIONS)
 BOOST_ACTION_INDEX = next(
@@ -235,57 +229,6 @@ def write_racer_buttons(
     return state
 
 
-def cpu_command_from_action(
-    state: RacerState,
-    action: object,
-    *,
-    max_turn: int = DEFAULT_MAX_TURN,
-    max_target_speed: int = DEFAULT_MAX_TARGET_SPEED,
-) -> NPCCommand:
-    """Convert the same intent into the patched native CPU control boundary."""
-
-    if not 0 <= max_turn <= 0x800:
-        raise ValueError("max_turn must be between 0 and 0x800")
-    if not 0 < max_target_speed <= 0xFFFFFFFF:
-        raise ValueError("max_target_speed must fit in an unsigned 32-bit value")
-    selected = RAM_ACTIONS[_action_index(action)]
-    desired_heading = (state.current_heading + selected.steering * max_turn) & (
-        HEADING_PERIOD - 1
-    )
-    return NPCCommand(
-        desired_heading=desired_heading,
-        target_speed=selected.throttle * max_target_speed,
-    )
-
-
-def write_cpu_command(
-    race: RaceMemory,
-    slot: int,
-    action: object,
-    *,
-    max_turn: int = DEFAULT_MAX_TURN,
-    max_target_speed: int = DEFAULT_MAX_TARGET_SPEED,
-) -> NPCCommand:
-    racer = race.layout.cpu(slot)
-    command = cpu_command_from_action(
-        race.state(slot),
-        action,
-        max_turn=max_turn,
-        max_target_speed=max_target_speed,
-    )
-    race.memory.assign(
-        racer.address + RACER_DESIRED_HEADING_OFFSET,
-        "<u2",
-        command.desired_heading,
-    )
-    race.memory.assign(
-        racer.address + RACER_TARGET_SPEED_OFFSET,
-        "<u4",
-        command.target_speed,
-    )
-    return command
-
-
 @dataclass
 class RaceProgressTracker:
     """Track per-racer laps and race order across checkpoint wraparound."""
@@ -407,14 +350,13 @@ def build_dino_ram_observation(
     previous_action: object,
     *,
     total_laps: int = 3,
-    max_target_speed: int = DEFAULT_MAX_TARGET_SPEED,
 ) -> tuple[float, ...]:
-    """Build the same Dino racer-centric observation for Player 1 or a CPU."""
+    """Build the same Dino racer-centric observation for any racer slot."""
 
     if set(states) != set(previous_states):
         raise ValueError("current and previous racer slots differ")
-    if total_laps <= 0 or max_target_speed <= 0:
-        raise ValueError("normalization scales must be positive")
+    if total_laps <= 0:
+        raise ValueError("total_laps must be positive")
 
     action_index = _action_index(previous_action)
     state = states[controlled_slot]
@@ -436,7 +378,7 @@ def build_dino_ram_observation(
         *heading,
         _clip((state.x - DINO_POSITION_CENTER) / DINO_POSITION_SCALE),
         _clip((state.z - DINO_POSITION_CENTER) / DINO_POSITION_SCALE),
-        _clip(state.speed / max_target_speed, 0.0, 1.0),
+        _clip(state.speed / RAM_SPEED_SCALE, 0.0, 1.0),
         _clip(state.boost / MAX_BOOST_CHARGE, 0.0, 1.0),
         *track_phase,
         lap_value,
@@ -467,7 +409,7 @@ def build_dino_ram_observation(
                 _clip((dx * right_x + dz * right_z) / RELATIVE_POSITION_SCALE),
                 _clip(hypot(dx, dz) / RELATIVE_POSITION_SCALE, 0.0, 1.0),
                 _clip(relative_progress / max(1.0, progress.progress_count / 2.0)),
-                _clip((other.speed - state.speed) / max_target_speed),
+                _clip((other.speed - state.speed) / RAM_SPEED_SCALE),
                 _clip(other.boost / MAX_BOOST_CHARGE, 0.0, 1.0),
                 *relative_heading,
                 _clip(
@@ -491,7 +433,6 @@ def build_dino_ram_observation(
 def race_reward(
     advance: int,
     speed: int,
-    max_target_speed: int,
     *,
     previous_rank: int,
     current_rank: int,
@@ -504,7 +445,7 @@ def race_reward(
 ) -> float:
     """Progress-dominant reward with modest road-following safety shaping."""
 
-    speed_ratio = _clip(speed / max(1, max_target_speed), 0.0, 1.0)
+    speed_ratio = _clip(speed / RAM_SPEED_SCALE, 0.0, 1.0)
     lateral_penalty = 0.003 * abs(_clip(lateral_offset))
     heading_penalty = 0.002 * (1.0 - _clip(heading_alignment)) / 2.0
     return float(

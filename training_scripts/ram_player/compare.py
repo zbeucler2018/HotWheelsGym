@@ -56,7 +56,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-record-video",
         action="store_true",
-        help="skip MP4 recordings and TensorBoard replay GIFs",
+        help="skip MP4 recordings",
     )
     return parser
 

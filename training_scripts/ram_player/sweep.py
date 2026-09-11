@@ -40,7 +40,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-record-video",
         action="store_true",
-        help="skip the fastest-checkpoint MP4 and TensorBoard replay",
+        help="skip the fastest-checkpoint MP4",
     )
     return parser
 

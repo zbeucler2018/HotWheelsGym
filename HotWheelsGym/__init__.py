@@ -4,7 +4,6 @@ import shutil
 
 from .enums import RaceMode, Tracks
 from .HotWheels import HotWheelsEnv
-from .NPC import HotWheelsNPCEnv, ModelOpponentEnv
 from .RAMOpponent import (
     DinoRAMModelOpponentEnv,
     DinoRAMPlayerEnv,
@@ -17,10 +16,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 __all__ = [
     "import_rom",
     "make",
-    "make_npc",
     "HotWheelsEnv",
-    "HotWheelsNPCEnv",
-    "ModelOpponentEnv",
     "DinoRAMPlayerEnv",
     "DinoRAMModelOpponentEnv",
     "RAMActionRepeat",
@@ -82,24 +78,4 @@ def make(id: str, **kwargs) -> HotWheelsEnv:
         mode=RaceMode(mode),
         total_laps=int(laps),
         **kwargs,
-    )
-
-
-def make_npc(
-    id: str,
-    npc_slot: int = 1,
-    *,
-    max_turn: int = 0x200,
-    max_target_speed: int = 0x12000,
-    player_action=None,
-    **kwargs,
-) -> HotWheelsNPCEnv:
-    """Make a structured-observation environment for one native CPU slot."""
-
-    return HotWheelsNPCEnv(
-        make(id, **kwargs),
-        npc_slot=npc_slot,
-        max_turn=max_turn,
-        max_target_speed=max_target_speed,
-        player_action=player_action,
     )

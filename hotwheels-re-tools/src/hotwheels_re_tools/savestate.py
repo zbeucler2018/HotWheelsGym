@@ -8,7 +8,6 @@ from pathlib import Path
 import struct
 from typing import Any
 
-
 SAVESTATE_SIZE = 0x61000
 EWRAM_OFFSET = 0x21000
 EWRAM_SIZE = 0x40000
@@ -43,9 +42,6 @@ class Racer:
     speed: int
     speed_fixed: int
     current_heading: int
-    desired_heading: int | None
-    stock_heading_shadow: int | None
-    target_speed: int | None
     cpu_score_be: int | None
     pressed: int | None
     released: int | None
@@ -186,12 +182,9 @@ def inspect_state(path: Path) -> Inspection:
                 speed=read_u16(ewram, address + 0xE9),
                 speed_fixed=read_u32(ewram, address + 0xE8),
                 current_heading=read_u16(ewram, address + 0xDE),
-                desired_heading=(read_u16(ewram, address + 0xE0) if not is_player else None),
-                stock_heading_shadow=(
-                    read_u16(ewram, address + 0x2EE) if not is_player else None
+                cpu_score_be=(
+                    read_be_u32(ewram, address + 0xEE) if not is_player else None
                 ),
-                target_speed=(read_u32(ewram, address + 0x2F0) if not is_player else None),
-                cpu_score_be=(read_be_u32(ewram, address + 0xEE) if not is_player else None),
                 pressed=(read_u16(ewram, address + 0x302) if is_player else None),
                 released=(read_u16(ewram, address + 0x304) if is_player else None),
                 held=(read_u16(ewram, address + 0x306) if is_player else None),

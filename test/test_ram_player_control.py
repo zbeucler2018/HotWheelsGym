@@ -164,7 +164,9 @@ class RAMPlayerControlTests(unittest.TestCase):
             (-8, 8, 0, True),
         )
         self.assertEqual((reset.delta, reset.spent, reset.active), (-980, 0, False))
-        self.assertEqual((gained.delta, gained.gained, gained.active), (980, 980, False))
+        self.assertEqual(
+            (gained.delta, gained.gained, gained.active), (980, 980, False)
+        )
 
     def test_player_and_converted_npc_actions_have_identical_buttons(self):
         buttons = ("A", "B", "SELECT", "START", "RIGHT", "LEFT", "UP", "DOWN", "R", "L")
@@ -221,37 +223,16 @@ class RAMPlayerControlTests(unittest.TestCase):
         self.assertFalse(race.respawn_pending(0))
         self.assertTrue(race.respawn_pending(3))
 
-    def test_cpu_uses_same_discrete_intent(self):
-        race = npc.RaceMemory(state_memory(self.state_path))
-        state = race.state(1)
-        left = ram.cpu_command_from_action(state, 2)
-        right = ram.cpu_command_from_action(state, 3)
-        coast = ram.cpu_command_from_action(state, 0)
-        self.assertEqual(
-            left.desired_heading,
-            (state.current_heading - npc.DEFAULT_MAX_TURN) & 0xFFF,
-        )
-        self.assertEqual(
-            right.desired_heading,
-            (state.current_heading + npc.DEFAULT_MAX_TURN) & 0xFFF,
-        )
-        self.assertEqual(left.target_speed, npc.DEFAULT_MAX_TARGET_SPEED)
-        self.assertEqual(coast.target_speed, 0)
-
     def test_progress_tracker_counts_wrap_and_ranks_across_laps(self):
         def state(slot, progress):
             return npc.RacerState(
                 slot=slot,
                 vehicle_index=slot,
                 current_heading=0,
-                desired_heading=0,
-                stock_heading=0,
                 speed=0,
-                target_speed=0,
                 progress=progress,
                 x=0,
                 z=0,
-                rank=1,
             )
 
         before = {slot: state(slot, 340 - slot) for slot in range(4)}
@@ -268,14 +249,10 @@ class RAMPlayerControlTests(unittest.TestCase):
             slot=0,
             vehicle_index=0,
             current_heading=0,
-            desired_heading=0,
-            stock_heading=0,
             speed=0,
-            target_speed=0,
             progress=700,
             x=0,
             z=0,
-            rank=1,
         )
         tracker = ram.RaceProgressTracker.from_states({0: state}, 342)
         self.assertEqual(tracker.current_lap(0, state), 3)
@@ -290,11 +267,10 @@ class RAMPlayerControlTests(unittest.TestCase):
         self.assertEqual(timing.padded_splits(), (5300, 5100, 4900))
 
     def test_finished_race_reward_beats_partial_progress(self):
-        partial = ram.race_reward(1, 60_000, 73_728, previous_rank=2, current_rank=1)
+        partial = ram.race_reward(1, 60_000, previous_rank=2, current_rank=1)
         finished = ram.race_reward(
             1,
             60_000,
-            73_728,
             previous_rank=2,
             current_rank=1,
             completed_laps=1,
@@ -306,14 +282,12 @@ class RAMPlayerControlTests(unittest.TestCase):
         safe = ram.race_reward(
             0,
             30_000,
-            73_728,
             previous_rank=2,
             current_rank=2,
         )
         unsafe = ram.race_reward(
             0,
             30_000,
-            73_728,
             previous_rank=2,
             current_rank=2,
             hit_wall=True,

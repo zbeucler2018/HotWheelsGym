@@ -46,8 +46,6 @@ class SavestateTests(unittest.TestCase):
             put_u16(address + 0x148, progress)
         put_u16(player + 0x306, 0x21)
         put_u16(cpu + 0xDE, 0x123)
-        put_u16(cpu + 0xE0, 0x120)
-        put_u32(cpu + 0x2F0, 0xEA00)
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "sample.state"
@@ -57,13 +55,13 @@ class SavestateTests(unittest.TestCase):
 
         self.assertEqual(result.manager, manager)
         self.assertEqual(result.pointer_list, pointer_list)
-        self.assertEqual((result.player_count, result.cpu_count, result.total_count), (1, 1, 2))
+        self.assertEqual(
+            (result.player_count, result.cpu_count, result.total_count), (1, 1, 2)
+        )
         self.assertEqual([racer.kind for racer in result.racers], ["player", "cpu"])
         self.assertEqual([racer.progress for racer in result.racers], [71, 73])
         self.assertEqual(result.racers[0].held, 0x21)
         self.assertEqual(result.racers[1].current_heading, 0x123)
-        self.assertEqual(result.racers[1].desired_heading, 0x120)
-        self.assertEqual(result.racers[1].target_speed, 0xEA00)
 
 
 if __name__ == "__main__":

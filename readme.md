@@ -50,8 +50,7 @@ actions as Player 1. The game still owns physics, collisions, rendering, and
 race management.
 
 This requires a locally generated ROM patch and fresh private start-line state;
-neither is committed. See [NPC_ENVIRONMENT.md](NPC_ENVIRONMENT.md) for the
-low-level research interface and [RAM_PLAYER.md](RAM_PLAYER.md) for the proven
+neither is committed. See [RAM_PLAYER.md](RAM_PLAYER.md) for the proven
 Player-1/self-play workflow.
 
 For the faster self-play path, the repository also has a separate Player 1

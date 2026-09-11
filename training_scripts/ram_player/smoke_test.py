@@ -72,8 +72,6 @@ def main() -> None:
         max_episode_steps=int(config["max_episode_steps"]),
         seed=int(config["seed"]),
         opponent_paths={slot: str(path) for slot, path in opponents.items()},
-        opponent_max_turn=int(config["opponent_max_turn"]),
-        opponent_max_target_speed=int(config["opponent_max_target_speed"]),
         state_path=str(states[0]) if states[0] else None,
     )
     try:

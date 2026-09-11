@@ -12,14 +12,10 @@ import numpy as np
 from .dino_boneyard_track import dino_track_pose
 from .enums import RaceMode, Tracks
 from .npc_control import (
-    DEFAULT_MAX_TARGET_SPEED,
-    DEFAULT_MAX_TURN,
     MAX_BOOST_CHARGE,
-    NPCCommand,
     RaceMemory,
     RacerState,
     button_controlled_vehicle_indices_from_rom,
-    controlled_vehicle_indices_from_rom,
     progress_delta,
 )
 from .ram_opponent_control import (
@@ -35,7 +31,6 @@ from .ram_opponent_control import (
     race_reward,
     read_racer_states,
     write_racer_buttons,
-    write_cpu_command,
 )
 
 
@@ -73,41 +68,26 @@ def _validate_dino_multi(env: gym.Env) -> None:
         )
 
 
-def _validate_slots(env: gym.Env, race: RaceMemory, slots: tuple[int, ...]) -> str:
+def _validate_slots(env: gym.Env, race: RaceMemory, slots: tuple[int, ...]) -> None:
     if any(slot not in (1, 2, 3) for slot in slots):
         raise ValueError("RAM opponent slots must be 1, 2, or 3")
     rom_path = Path(_bare_env(env).rom_path)
     button_vehicles = button_controlled_vehicle_indices_from_rom(rom_path)
-    if button_vehicles:
-        missing = [
-            race.layout.opponent(slot).vehicle_index
-            for slot in slots
-            if race.layout.opponent(slot).kind != "player"
-            or race.layout.opponent(slot).vehicle_index not in button_vehicles
-        ]
-        if missing:
-            raise RuntimeError(
-                "the active native-button ROM/state does not expose vehicle index/indices "
-                + ", ".join(str(index) for index in sorted(set(missing)))
-            )
-        return "buttons"
-
-    controlled_vehicles = controlled_vehicle_indices_from_rom(rom_path)
-    if not controlled_vehicles:
+    if not button_vehicles:
         raise RuntimeError(
-            "the active ROM does not have the selected-NPC control patch"
+            "the active ROM does not have the native-button opponent patch"
         )
     missing = [
-        race.layout.cpu(slot).vehicle_index
+        race.layout.opponent(slot).vehicle_index
         for slot in slots
-        if race.layout.cpu(slot).vehicle_index not in controlled_vehicles
+        if race.layout.opponent(slot).kind != "player"
+        or race.layout.opponent(slot).vehicle_index not in button_vehicles
     ]
     if missing:
         raise RuntimeError(
-            "the active ROM does not expose CPU vehicle index/indices "
+            "the active native-button ROM/state does not expose vehicle index/indices "
             + ", ".join(str(index) for index in sorted(set(missing)))
         )
-    return "cpu_commands"
 
 
 def _state_info(
@@ -263,9 +243,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
             self._finish_frame = self._raw_frame
         if self._lap_timing is None:
             raise RuntimeError("call reset() before tracking lap splits")
-        self._lap_timing.update(
-            current_lap, self._raw_frame, finished_now=finished_now
-        )
+        self._lap_timing.update(current_lap, self._raw_frame, finished_now=finished_now)
 
         advance = progress_delta(
             previous.progress,
@@ -281,7 +259,6 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         reward = race_reward(
             advance,
             current.speed,
-            DEFAULT_MAX_TARGET_SPEED,
             previous_rank=previous_rank,
             current_rank=current_rank,
             completed_laps=max(0, current_lap - previous_lap),
@@ -381,8 +358,6 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         *,
         deterministic: bool = True,
         action_repeat: int = 4,
-        max_turn: int = DEFAULT_MAX_TURN,
-        max_target_speed: int = DEFAULT_MAX_TARGET_SPEED,
         mask_opponent_respawn_flashes: bool = True,
     ) -> None:
         _validate_dino_multi(env)
@@ -397,8 +372,6 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         self.opponents = dict(opponents)
         self.deterministic = deterministic
         self.action_repeat = action_repeat
-        self.max_turn = max_turn
-        self.max_target_speed = max_target_speed
         self.mask_opponent_respawn_flashes = mask_opponent_respawn_flashes
         self._race: RaceMemory | None = None
         self._progress: RaceProgressTracker | None = None
@@ -410,7 +383,6 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         self._finish_frames: dict[int, int | None] = {}
         self._lap_timings: dict[int, LapSplitTracker] = {}
         self._button_masks: dict[int, int] = {}
-        self._control_mode: str | None = None
         self._raw_frame = 0
         self._last_visible_frame: np.ndarray | None = None
         self._render_override: np.ndarray | None = None
@@ -432,7 +404,6 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
                 slot,
                 self._actions[slot],
                 total_laps=int(_bare_env(self.env).total_laps),
-                max_target_speed=self.max_target_speed,
             ),
             dtype=np.float32,
         )
@@ -441,7 +412,7 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         observation, info = self.env.reset(**kwargs)
         self._race = RaceMemory(_bare_env(self.env).data.memory)
         slots = tuple(sorted(self.opponents))
-        self._control_mode = _validate_slots(self.env, self._race, slots)
+        _validate_slots(self.env, self._race, slots)
         self._states = read_racer_states(self._race)
         self._previous_states = dict(self._states)
         self._progress = RaceProgressTracker.from_states(
@@ -449,9 +420,8 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         )
         self._actions = {slot: 0 for slot in slots}
         self._button_masks = {slot: 0 for slot in slots}
-        if self._control_mode == "buttons":
-            for slot in slots:
-                write_racer_buttons(self._race, slot, 0, 0)
+        for slot in slots:
+            write_racer_buttons(self._race, slot, 0, 0)
         self._frames_until_action = {slot: 0 for slot in slots}
         self._finished = {slot: False for slot in slots}
         self._finish_frames = {slot: None for slot in slots}
@@ -484,9 +454,7 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
                     finish_frame=None,
                 )
             )
-            info.update(
-                _lap_split_info(f"ram_npc_{slot}_", self._lap_timings[slot])
-            )
+            info.update(_lap_split_info(f"ram_npc_{slot}_", self._lap_timings[slot]))
             info[f"ram_npc_{slot}_boost_delta"] = 0
             info[f"ram_npc_{slot}_boost_spent"] = 0
             info[f"ram_npc_{slot}_boost_gained"] = 0
@@ -497,7 +465,7 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         if self._race is None or self._states is None:
             raise RuntimeError("call reset() before step()")
 
-        commands: dict[int, NPCCommand | RacerButtonState] = {}
+        button_states: dict[int, RacerButtonState] = {}
         for slot, policy in self.opponents.items():
             if self._frames_until_action[slot] == 0:
                 prediction = policy.predict(
@@ -514,23 +482,14 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
                     )
                 self._actions[slot] = int(flat_action[0])
                 self._frames_until_action[slot] = self.action_repeat
-            if self._control_mode == "buttons":
-                buttons = write_racer_buttons(
-                    self._race,
-                    slot,
-                    self._actions[slot],
-                    self._button_masks[slot],
-                )
-                self._button_masks[slot] = buttons.held
-                commands[slot] = buttons
-            else:
-                commands[slot] = write_cpu_command(
-                    self._race,
-                    slot,
-                    self._actions[slot],
-                    max_turn=self.max_turn,
-                    max_target_speed=self.max_target_speed,
-                )
+            buttons = write_racer_buttons(
+                self._race,
+                slot,
+                self._actions[slot],
+                self._button_masks[slot],
+            )
+            self._button_masks[slot] = buttons.held
+            button_states[slot] = buttons
             self._frames_until_action[slot] -= 1
 
         observation, reward, terminated, truncated, info = self.env.step(player_action)
@@ -577,7 +536,7 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         info["ram_player_respawn_pending"] = player_respawn_pending
         info["ram_opponent_respawn_pending_slots"] = opponent_respawn_slots
 
-        for slot, command in commands.items():
+        for slot, buttons in button_states.items():
             finished_now = bool(
                 not self._finished[slot]
                 and self._progress.current_lap(slot, current_states[slot]) > total_laps
@@ -617,13 +576,9 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
             info[f"{prefix}boost_spent"] = boost.spent
             info[f"{prefix}boost_gained"] = boost.gained
             info[f"{prefix}boost_active"] = boost.active
-            if isinstance(command, RacerButtonState):
-                info[f"{prefix}buttons_pressed"] = command.pressed
-                info[f"{prefix}buttons_released"] = command.released
-                info[f"{prefix}buttons_held"] = command.held
-            else:
-                info[f"{prefix}command_heading"] = command.desired_heading
-                info[f"{prefix}command_speed"] = command.target_speed
+            info[f"{prefix}buttons_pressed"] = buttons.pressed
+            info[f"{prefix}buttons_released"] = buttons.released
+            info[f"{prefix}buttons_held"] = buttons.held
         return observation, reward, terminated, truncated, info
 
     def render(self) -> Any:

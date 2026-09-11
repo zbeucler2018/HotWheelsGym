@@ -19,10 +19,7 @@ from stable_baselines3.common.monitor import Monitor
 
 import HotWheelsGym
 from HotWheelsGym import DinoRAMModelOpponentEnv, DinoRAMPlayerEnv, RAMActionRepeat
-from HotWheelsGym.npc_control import (
-    button_controlled_vehicle_indices_from_rom,
-    controlled_vehicle_indices_from_rom,
-)
+from HotWheelsGym.npc_control import button_controlled_vehicle_indices_from_rom
 from HotWheelsGym.ram_opponent_control import (
     DINO_RAM_OBSERVATION_SIZE,
     DINO_RAM_OBSERVATION_VERSION,
@@ -62,8 +59,6 @@ def load_config(path: Path) -> dict[str, Any]:
         "frame_skip",
         "max_episode_steps",
         "opponents",
-        "opponent_max_turn",
-        "opponent_max_target_speed",
         "eval_every_timesteps",
         "eval_episodes",
         "checkpoint_every_timesteps",
@@ -91,14 +86,10 @@ def load_config(path: Path) -> dict[str, Any]:
         raise ValueError("eval_every_timesteps must be at least one")
     if int(config["checkpoint_every_timesteps"]) < 1:
         raise ValueError("checkpoint_every_timesteps must be at least one")
-    if not 0 <= int(config["opponent_max_turn"]) <= 0x800:
-        raise ValueError("opponent_max_turn must be between 0 and 0x800")
-    if not 0 < int(config["opponent_max_target_speed"]) <= 0xFFFFFFFF:
-        raise ValueError("opponent_max_target_speed must fit in unsigned 32 bits")
     if not isinstance(config["ppo"], dict):
         raise ValueError("ppo configuration must be a mapping")
     if not isinstance(config["opponents"], dict):
-        raise ValueError("opponents must map CPU slots to RAM model paths")
+        raise ValueError("opponents must map racer slots to RAM model paths")
     return config
 
 
@@ -178,18 +169,12 @@ def prepare_rom(
         raise FileNotFoundError(source_rom)
     requested = tuple(sorted(set(opponent_slots)))
     button_controlled = button_controlled_vehicle_indices_from_rom(source_rom)
-    controlled = controlled_vehicle_indices_from_rom(source_rom)
     if button_controlled and not set(requested).issubset(button_controlled):
         raise ValueError(
             f"{source_rom} controls vehicle indices {button_controlled}, but this run "
             f"requests {requested}"
         )
-    if controlled and controlled != requested:
-        raise ValueError(
-            f"{source_rom} controls vehicle indices {controlled}, but this run needs "
-            f"exactly {requested}; use the original ROM and let the runner patch it"
-        )
-    if requested and not button_controlled and not controlled:
+    if requested and not button_controlled:
         private_dir.mkdir(parents=True, exist_ok=True)
         active_rom = private_dir / "dino-native-buttons.gba"
         tool_source = REPO_ROOT / "hotwheels-re-tools" / "src"
@@ -254,8 +239,6 @@ def make_ram_env(
     max_episode_steps: int,
     seed: int,
     opponent_paths: Mapping[int, str] | None = None,
-    opponent_max_turn: int = 0x200,
-    opponent_max_target_speed: int = 0x12000,
     state_path: str | None = None,
     monitor_path: str | None = None,
 ) -> gym.Env:
@@ -278,8 +261,6 @@ def make_ram_env(
             env,
             models,
             action_repeat=frame_skip,
-            max_turn=opponent_max_turn,
-            max_target_speed=opponent_max_target_speed,
         )
     env = DinoRAMPlayerEnv(env)
     env = RAMActionRepeat(env, repeat=frame_skip)
