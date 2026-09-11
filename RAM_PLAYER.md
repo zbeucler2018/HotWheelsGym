@@ -131,11 +131,11 @@ Recommended continuation:
 1. validate racer byte `+0x27D` as a possible skid/sharp-steering state before
    the first v4 training run; add it only if controlled tests show that it
    exposes useful grip state rather than duplicating turn-rate telemetry;
-2. freeze the resulting observation contract and train a fresh solo policy
-   against the stock opponents, because v3 checkpoints cannot consume the new
-   input shape;
-3. add sector timing and record the progress location of missed Jet Boost
-   pickups, walls, stalls, and respawns;
+2. freeze the resulting observation contract, then add sector timing and record
+   the progress location of missed Jet Boost pickups, walls, stalls, and
+   respawns without changing the observation;
+3. train a fresh solo policy against the stock opponents, because v3
+   checkpoints cannot consume the new input shape;
 4. rank checkpoints over multiple start-line races, preferring reliable
    zero-respawn finishes and then median finish time;
 5. perform a small portability audit on a track with different power-ups,
