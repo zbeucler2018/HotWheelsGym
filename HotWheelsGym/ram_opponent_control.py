@@ -1,13 +1,13 @@
 """Pure contracts shared by the Player 1 RAM policy and model opponents.
 
-The policy sees the same racer-relative observation and emits the same discrete
+The policy sees the same racer-relative observation and emits the same factorized
 button action whether it occupies Player 1 or a converted player-class slot. This
 module deliberately has no Gymnasium, Stable-Retro, NumPy, or PyTorch imports.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import cos, hypot, pi, sin
 from operator import index as integer_index
 from typing import Mapping
@@ -34,7 +34,9 @@ from .npc_control import (
 DINO_BONEYARD_PROGRESS_COUNT = 342
 DINO_HAIRPIN_START_PROGRESS = 45
 DINO_HAIRPIN_END_PROGRESS = 61
-DINO_RAM_OBSERVATION_VERSION = 5
+DINO_RAM_OBSERVATION_VERSION = 6
+DINO_SECTOR_BOUNDARIES = (0, 32, 45, 61, 92, 124, 156, 188, 220, 252, 284, 316, 342)
+DINO_SECTOR_COUNT = len(DINO_SECTOR_BOUNDARIES) - 1
 DINO_POSITION_CENTER = 1 << 24
 DINO_POSITION_SCALE = 1 << 24
 RELATIVE_POSITION_SCALE = 1 << 23
@@ -154,19 +156,132 @@ class DinoHairpinTelemetry:
             self._active_minimum_speed = None
 
 
-RAM_ACTIONS = (
+def dino_sector_index(progress: int) -> int:
+    """Map native track progress to one of the full-lap diagnostic sectors."""
+
+    index = progress % DINO_BONEYARD_PROGRESS_COUNT
+    for sector, (start, end) in enumerate(
+        zip(DINO_SECTOR_BOUNDARIES, DINO_SECTOR_BOUNDARIES[1:])
+    ):
+        if start <= index < end:
+            return sector
+    raise RuntimeError(f"Dino progress {index} is outside the sector map")
+
+
+@dataclass
+class DinoSectorTelemetry:
+    """Accumulate raw-frame timing and handling diagnostics across the whole lap."""
+
+    entries: list[int] = field(default_factory=lambda: [0] * DINO_SECTOR_COUNT)
+    completed: list[int] = field(default_factory=lambda: [0] * DINO_SECTOR_COUNT)
+    frames: list[int] = field(default_factory=lambda: [0] * DINO_SECTOR_COUNT)
+    completed_frames: list[int] = field(default_factory=lambda: [0] * DINO_SECTOR_COUNT)
+    entry_speed_total: list[int] = field(
+        default_factory=lambda: [0] * DINO_SECTOR_COUNT
+    )
+    minimum_speed_total: list[int] = field(
+        default_factory=lambda: [0] * DINO_SECTOR_COUNT
+    )
+    exit_speed_total: list[int] = field(default_factory=lambda: [0] * DINO_SECTOR_COUNT)
+    wall_frames: list[int] = field(default_factory=lambda: [0] * DINO_SECTOR_COUNT)
+    skid_frames: list[int] = field(default_factory=lambda: [0] * DINO_SECTOR_COUNT)
+    boost_frames: list[int] = field(default_factory=lambda: [0] * DINO_SECTOR_COUNT)
+    jet_boost_frames: list[int] = field(default_factory=lambda: [0] * DINO_SECTOR_COUNT)
+    jet_boost_pickups: list[int] = field(
+        default_factory=lambda: [0] * DINO_SECTOR_COUNT
+    )
+    lap_completed_frames: dict[tuple[int, int], int] = field(default_factory=dict)
+    active_sector: int | None = None
+    _active_lap: int = 1
+    _active_frames: int = 0
+    _active_minimum_speed: int | None = None
+
+    @classmethod
+    def start(cls, state: RacerState, current_lap: int = 1) -> "DinoSectorTelemetry":
+        telemetry = cls()
+        telemetry._start_sector(
+            dino_sector_index(state.progress), state.speed, current_lap
+        )
+        return telemetry
+
+    def _start_sector(self, sector: int, speed: int, current_lap: int) -> None:
+        self.active_sector = sector
+        self._active_lap = current_lap
+        self.entries[sector] += 1
+        self.entry_speed_total[sector] += speed
+        self._active_frames = 0
+        self._active_minimum_speed = None
+
+    def update(
+        self,
+        previous: RacerState,
+        current: RacerState,
+        *,
+        advance: int,
+        hit_wall: bool,
+        boost_active: bool,
+        jet_boost_acquired: bool,
+        current_lap: int = 1,
+    ) -> None:
+        """Record one emulator frame without affecting the policy or game state."""
+
+        current_sector = dino_sector_index(current.progress)
+        if self.active_sector is None:
+            self._start_sector(current_sector, current.speed, current_lap)
+        elif current_sector != self.active_sector:
+            expected_sector = (self.active_sector + 1) % DINO_SECTOR_COUNT
+            if advance > 0 and current_sector == expected_sector:
+                completed_sector = self.active_sector
+                self.completed[completed_sector] += 1
+                self.completed_frames[completed_sector] += self._active_frames
+                key = (self._active_lap, completed_sector)
+                self.lap_completed_frames[key] = (
+                    self.lap_completed_frames.get(key, 0) + self._active_frames
+                )
+                self.exit_speed_total[completed_sector] += current.speed
+                self.minimum_speed_total[completed_sector] += (
+                    self._active_minimum_speed or 0
+                )
+            self._start_sector(current_sector, current.speed, current_lap)
+
+        sector = current_sector
+        self.frames[sector] += 1
+        self.wall_frames[sector] += int(hit_wall)
+        self.skid_frames[sector] += int(current.skid_active)
+        self.boost_frames[sector] += int(boost_active)
+        self.jet_boost_frames[sector] += int(current.jet_boost_remaining > 0)
+        self.jet_boost_pickups[sector] += int(jet_boost_acquired)
+        self._active_frames += 1
+        if self._active_minimum_speed is None:
+            self._active_minimum_speed = current.speed
+        else:
+            self._active_minimum_speed = min(self._active_minimum_speed, current.speed)
+
+
+RAM_DRIVE_ACTIONS = (
     RacerAction("coast", ()),
     RacerAction("accelerate", ("A",)),
-    RacerAction("accelerate_left", ("A", "LEFT")),
-    RacerAction("accelerate_right", ("A", "RIGHT")),
     RacerAction("brake", ("B",)),
     RacerAction("accelerate_up", ("A", "UP")),
-    RacerAction("boost", ("A", "L", "R")),
 )
-RAM_ACTION_SIZE = len(RAM_ACTIONS)
-BOOST_ACTION_INDEX = next(
-    index for index, action in enumerate(RAM_ACTIONS) if action.name == "boost"
+RAM_STEERING_ACTIONS = (
+    RacerAction("straight", ()),
+    RacerAction("left", ("LEFT",)),
+    RacerAction("right", ("RIGHT",)),
 )
+RAM_BOOST_ACTIONS = (
+    RacerAction("off", ()),
+    RacerAction("on", ("L", "R")),
+)
+RAM_ACTION_COMPONENTS = (
+    ("drive", RAM_DRIVE_ACTIONS),
+    ("steering", RAM_STEERING_ACTIONS),
+    ("boost", RAM_BOOST_ACTIONS),
+)
+RAM_ACTION_COMPONENT_SIZES = tuple(len(actions) for _, actions in RAM_ACTION_COMPONENTS)
+RAM_DEFAULT_ACTION = (0, 0, 0)
+RAM_BOOST_COMPONENT = 2
+RAM_BOOST_ON = 1
 
 SELF_OBSERVATION_NAMES = (
     (
@@ -187,7 +302,11 @@ SELF_OBSERVATION_NAMES = (
         "self_progress_rate",
     )
     + DINO_TRACK_OBSERVATION_NAMES
-    + tuple(f"previous_action_{action.name}" for action in RAM_ACTIONS)
+    + tuple(
+        f"previous_{component}_{action.name}"
+        for component, actions in RAM_ACTION_COMPONENTS
+        for action in actions
+    )
 )
 
 OTHER_OBSERVATION_NAMES = (
@@ -208,7 +327,9 @@ RAM_OBSERVATION_NAMES = SELF_OBSERVATION_NAMES + tuple(
     for name in OTHER_OBSERVATION_NAMES
 )
 
-SELF_OBSERVATION_SIZE = 15 + DINO_TRACK_OBSERVATION_SIZE + RAM_ACTION_SIZE
+SELF_OBSERVATION_SIZE = (
+    15 + DINO_TRACK_OBSERVATION_SIZE + sum(RAM_ACTION_COMPONENT_SIZES)
+)
 OTHER_OBSERVATION_SIZE = 9
 DINO_RAM_OBSERVATION_SIZE = SELF_OBSERVATION_SIZE + 3 * OTHER_OBSERVATION_SIZE
 
@@ -229,14 +350,42 @@ def _heading_pair(heading: int) -> tuple[float, float]:
     return sin(angle), cos(angle)
 
 
-def _action_index(action: object) -> int:
+def normalize_racer_action(action: object) -> tuple[int, int, int]:
+    """Validate one factorized ``drive, steering, boost`` policy action."""
+
     try:
-        result = integer_index(action)
+        raw_components = tuple(action)  # type: ignore[arg-type]
     except TypeError as error:
-        raise ValueError("RAM racer action must be an integer") from error
-    if not 0 <= result < RAM_ACTION_SIZE:
-        raise ValueError(f"RAM racer action must be in 0..{RAM_ACTION_SIZE - 1}")
-    return result
+        raise ValueError(
+            "RAM racer action must contain drive, steering, and boost values"
+        ) from error
+    if len(raw_components) != len(RAM_ACTION_COMPONENTS):
+        raise ValueError(
+            "RAM racer action must contain exactly drive, steering, and boost values"
+        )
+    components: list[int] = []
+    for raw_value, (name, choices) in zip(raw_components, RAM_ACTION_COMPONENTS):
+        try:
+            value = integer_index(raw_value)
+        except TypeError as error:
+            raise ValueError(f"RAM racer {name} action must be an integer") from error
+        if not 0 <= value < len(choices):
+            raise ValueError(
+                f"RAM racer {name} action must be in 0..{len(choices) - 1}"
+            )
+        components.append(value)
+    return tuple(components)  # type: ignore[return-value]
+
+
+def racer_action_buttons(action: object) -> tuple[str, ...]:
+    """Return the native buttons represented by a factorized policy action."""
+
+    components = normalize_racer_action(action)
+    return tuple(
+        button
+        for component, (_, choices) in zip(components, RAM_ACTION_COMPONENTS)
+        for button in choices[component].buttons
+    )
 
 
 def player_buttons_from_action(
@@ -244,7 +393,7 @@ def player_buttons_from_action(
 ) -> tuple[bool, ...]:
     """Convert shared driving intent into the native Player 1 button vector."""
 
-    selected = set(RAM_ACTIONS[_action_index(action)].buttons)
+    selected = set(racer_action_buttons(action))
     missing = selected - set(button_names)
     if missing:
         raise ValueError(
@@ -256,9 +405,7 @@ def player_buttons_from_action(
 def gba_button_mask_from_action(action: object) -> int:
     """Convert one shared action to the game's native 10-bit button mask."""
 
-    return sum(
-        GBA_BUTTON_BITS[name] for name in RAM_ACTIONS[_action_index(action)].buttons
-    )
+    return sum(GBA_BUTTON_BITS[name] for name in racer_action_buttons(action))
 
 
 def boost_telemetry(
@@ -266,9 +413,9 @@ def boost_telemetry(
 ) -> BoostTelemetry:
     """Describe charge movement caused while a racer is requesting boost."""
 
-    action_index = _action_index(action)
+    components = normalize_racer_action(action)
     delta = current_charge - previous_charge
-    active = action_index == BOOST_ACTION_INDEX and previous_charge > 0
+    active = components[RAM_BOOST_COMPONENT] == RAM_BOOST_ON and previous_charge > 0
     return BoostTelemetry(
         delta=delta,
         spent=max(0, -delta) if active else 0,
@@ -432,7 +579,7 @@ def build_dino_ram_observation(
     if total_laps <= 0:
         raise ValueError("total_laps must be positive")
 
-    action_index = _action_index(previous_action)
+    action_components = normalize_racer_action(previous_action)
     state = states[controlled_slot]
     previous = previous_states[controlled_slot]
     heading = _heading_pair(state.current_heading)
@@ -463,7 +610,11 @@ def build_dino_ram_observation(
         _clip(heading_delta(state.current_heading, previous.current_heading) / 0x200),
         _clip(advance / 4.0),
         *track.features,
-        *(1.0 if index == action_index else 0.0 for index in range(RAM_ACTION_SIZE)),
+        *(
+            1.0 if index == selected else 0.0
+            for selected, size in zip(action_components, RAM_ACTION_COMPONENT_SIZES)
+            for index in range(size)
+        ),
     ]
 
     angle = _angle(state.current_heading)

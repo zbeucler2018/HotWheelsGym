@@ -103,9 +103,10 @@ For each model opponent and each raw emulator frame, the opponent wrapper:
 6. advances the emulator, allowing the game's common update and physics to
    consume them.
 
-The supported actions are coast, A, A+Left, A+Right, B, A+Up, and A+L+R.
-The game's boost chord is L+R; the policy action also holds A so activating
-boost does not release the accelerator.
+The version-6 policy action has independent drive, steering, and boost
+components. Drive selects coast, A, B, or A+Up; steering independently selects
+straight, Left, or Right; boost independently selects off or L+R. Consequently
+the model can request pure L+R, A+L+R, or either chord while steering.
 
 ## ROM addresses versus runtime addresses
 
@@ -184,7 +185,7 @@ for slots 1–3.
 
 Observation symmetry is separate and is implemented in
 `build_dino_ram_observation()`. The function accepts a `controlled_slot` and
-rotates the same 60-value version-5 contract around that racer. Its own
+rotates the same 62-value version-6 contract around that racer. Its own
 heading, position, speed, boost, Jet Boost countdown, skid, lap/rank,
 short-term deltas, and Dino track-relative geometry always occupy the self
 fields. The other three racers are sorted by progress distance and represented
@@ -268,7 +269,7 @@ writing an output ROM.
   supported.
 - The native-button construction hook has been dynamically validated on Dino
   Boneyard. Other tracks still need cold-start soak tests.
-- The 60-value geometry/observation contract is Dino Boneyard-specific. Other
+- The 62-value geometry/observation contract is Dino Boneyard-specific. Other
   tracks need their own reference geometry and power-up portability audit.
 - Runtime discovery expects one active race manager, no more than eight racers,
   known racer vtables, and internally consistent EWRAM pointers. It is intended

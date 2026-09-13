@@ -23,7 +23,9 @@ from HotWheelsGym.npc_control import button_controlled_vehicle_indices_from_rom
 from HotWheelsGym.ram_opponent_control import (
     DINO_RAM_OBSERVATION_SIZE,
     DINO_RAM_OBSERVATION_VERSION,
-    RAM_ACTIONS,
+    DINO_SECTOR_BOUNDARIES,
+    RAM_ACTION_COMPONENTS,
+    RAM_ACTION_COMPONENT_SIZES,
     RAM_OBSERVATION_NAMES,
 )
 
@@ -162,28 +164,56 @@ def validate_model_observation_space(model: Any, path: str | Path) -> None:
             legacy_note = (
                 " This is an observation-v1 checkpoint; v2 added Dino Boneyard "
                 "centerline cues, v3 added symmetric boost charge, and v4 adds "
-                "the symmetric Jet Boost countdown. V5 adds native skid state."
+                "the symmetric Jet Boost countdown. V5 added native skid state; "
+                "v6 adds factorized action context."
             )
         elif shape == (54,):
             legacy_note = (
                 " This is an observation-v2 checkpoint; v3 added each racer's "
                 "normalized boost charge and v4 adds the symmetric Jet Boost "
-                "countdown. V5 adds native skid state. Train v5 from scratch."
+                "countdown. V5 added native skid state and v6 adds factorized "
+                "action context. Train v6 from scratch."
             )
         elif shape == (58,):
             legacy_note = (
                 " This is an observation-v3 checkpoint; v4 adds each controlled "
-                "racer's normalized Jet Boost countdown and v5 adds native skid "
-                "state. Train v5 from scratch."
+                "racer's normalized Jet Boost countdown, v5 added native skid "
+                "state, and v6 adds factorized action context. Train v6 from scratch."
             )
         elif shape == (59,):
             legacy_note = (
                 " This is an observation-v4 checkpoint; v5 adds each controlled "
-                "racer's native skid state and must be trained from scratch."
+                "racer's native skid state and v6 adds factorized action context. "
+                "Train v6 from scratch."
+            )
+        elif shape == (60,):
+            legacy_note = (
+                " This is an observation-v5 checkpoint; v6 factorizes drive, "
+                "steering, and boost so the policy can steer while boosting, and "
+                "encodes those action components in the observation. Train v6 "
+                "from scratch."
             )
         raise ValueError(
             f"RAM model {path} expects observation shape {shape}, but the active "
             f"contract is {expected}.{legacy_note}"
+        )
+
+
+def validate_model_action_space(model: Any, path: str | Path) -> None:
+    """Reject models that do not emit the v6 factorized driving action."""
+
+    nvec = tuple(int(value) for value in getattr(model.action_space, "nvec", ()))
+    if nvec != RAM_ACTION_COMPONENT_SIZES:
+        legacy_note = ""
+        if getattr(model.action_space, "n", None) == 7:
+            legacy_note = (
+                " This is a v5 seven-action checkpoint; v6 uses independent "
+                "drive, steering, and boost components."
+            )
+        raise ValueError(
+            f"RAM model {path} expects action space {model.action_space}, but the "
+            f"active contract is MultiDiscrete{RAM_ACTION_COMPONENT_SIZES}."
+            f"{legacy_note}"
         )
 
 
@@ -284,6 +314,7 @@ def make_ram_env(
         for slot, path in opponent_paths.items():
             model = PPO.load(path, device="cpu")
             validate_model_observation_space(model, path)
+            validate_model_action_space(model, path)
             models[int(slot)] = model
         env = DinoRAMModelOpponentEnv(
             env,
@@ -332,10 +363,18 @@ def write_run_metadata(
         "active_rom_path": str(active_rom.resolve()),
         "observation_version": DINO_RAM_OBSERVATION_VERSION,
         "observation_names": RAM_OBSERVATION_NAMES,
-        "actions": [
-            {"index": index, "name": action.name, "buttons": action.buttons}
-            for index, action in enumerate(RAM_ACTIONS)
-        ],
+        "sector_progress_boundaries": DINO_SECTOR_BOUNDARIES,
+        "action_space": {
+            "type": "MultiDiscrete",
+            "nvec": RAM_ACTION_COMPONENT_SIZES,
+            "components": {
+                component: [
+                    {"index": index, "name": action.name, "buttons": action.buttons}
+                    for index, action in enumerate(actions)
+                ]
+                for component, actions in RAM_ACTION_COMPONENTS
+            },
+        },
         "opponents": {
             str(slot): {"path": str(path), "sha1": file_sha1(path)}
             for slot, path in opponents.items()

@@ -1,33 +1,21 @@
-run_name: dino_ram_player_factorized_v6
-
-# Three emulator workers leave one N150 core available for PPO updates.
-total_timesteps: 5000000
+run_name: dino_ram_factorized_v6_ablation_15hz
+total_timesteps: 250000
 num_envs: 3
 seed: 2026
-
 environment: HWSTC-dino_boneyard-multi-3
 frame_skip: 4
 max_episode_steps: 4500
-# Keep training rollouts bounded, but allow a full start-line evaluation race.
 evaluation_max_episode_steps: 6000
-
-# Empty for the first overnight run. Later, map opponent slots to frozen Player 1
-# RAM checkpoints, e.g. the same model path under keys 1, 2, and 3.
 opponents: {}
-# Required only when opponents is non-empty. This must be a private state made
-# after the native-button ROM constructed all four racers as player-class cars.
 opponent_state: null
-
 training_states:
   - training_scripts/data/states/dino_boneyard_multi_71.state
   - training_scripts/data/states/dino_boneyard_multi_180.state
   - training_scripts/data/states/dino_boneyard_multi_290.state
-
 eval_every_timesteps: 250000
-eval_episodes: 2
+eval_episodes: 1
 checkpoint_every_timesteps: 250000
-record_video: true
-
+record_video: false
 ppo:
   learning_rate: 0.0003
   n_steps: 1024

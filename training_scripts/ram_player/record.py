@@ -9,6 +9,12 @@ from typing import Any, Mapping
 
 from stable_baselines3 import PPO
 
+from HotWheelsGym.ram_opponent_control import (
+    DINO_SECTOR_BOUNDARIES,
+    DINO_SECTOR_COUNT,
+)
+
+from .callbacks import SECTOR_METRIC_SUFFIXES, sector_metrics_from_info
 from .common import (
     DEFAULT_CONFIG,
     ENV_ID,
@@ -19,6 +25,7 @@ from .common import (
     opponent_state_path,
     prepare_rom,
     require_all_opponent_slots,
+    validate_model_action_space,
     validate_model_observation_space,
 )
 from .media import RGBVideoWriter
@@ -50,6 +57,7 @@ def record_model(
     )
     model = PPO.load(model_path, device=device)
     validate_model_observation_space(model, model_path)
+    validate_model_action_space(model, model_path)
     observation, info = env.reset(seed=int(config["seed"]) + 30_000)
     encoder = RGBVideoWriter(video_path, env.render(), fps=60 / frame_skip)
     terminated = truncated = False
@@ -89,6 +97,7 @@ def record_model(
         encoder.close()
         env.close()
 
+    sector_metrics = sector_metrics_from_info(info)
     result = {
         "environment": ENV_ID,
         "model": str(model_path),
@@ -136,6 +145,22 @@ def record_model(
             "wall_frames": int(info.get("ram_player_hairpin_wall_frames", 0)),
             "skid_frames": int(info.get("ram_player_hairpin_skid_frames", 0)),
         },
+        "sectors": [
+            {
+                "index": sector,
+                "progress_start": DINO_SECTOR_BOUNDARIES[sector],
+                "progress_end": DINO_SECTOR_BOUNDARIES[sector + 1],
+                **{
+                    suffix: sector_metrics[f"sector_{sector:02d}_{suffix}"]
+                    for suffix in SECTOR_METRIC_SUFFIXES
+                },
+                "lap_seconds": [
+                    sector_metrics[f"lap_{lap}_sector_{sector:02d}_seconds"]
+                    for lap in (1, 2, 3)
+                ],
+            }
+            for sector in range(DINO_SECTOR_COUNT)
+        ],
         "lap_split_frames": [
             int(info.get(f"ram_player_lap_{lap}_frames", 0)) for lap in (1, 2, 3)
         ],
@@ -171,14 +196,12 @@ def record_model(
                 "jet_boost_pickups": int(
                     info.get(f"ram_npc_{slot}_jet_boost_pickups", 0)
                 ),
-                "skid_active": bool(
-                    info.get(f"ram_npc_{slot}_skid_active", False)
-                ),
+                "skid_active": bool(info.get(f"ram_npc_{slot}_skid_active", False)),
                 "lap_split_frames": [
                     int(info.get(f"ram_npc_{slot}_lap_{lap}_frames", 0))
                     for lap in (1, 2, 3)
                 ],
-                "action": int(info.get(f"ram_npc_{slot}_action", 0)),
+                "action": list(info.get(f"ram_npc_{slot}_action", (0, 0, 0))),
             }
             for slot in sorted(opponent_paths)
         }

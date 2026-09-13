@@ -1,0 +1,31 @@
+run_name: dino_ram_factorized_v6_ablation_30hz
+total_timesteps: 500000
+num_envs: 3
+seed: 2026
+environment: HWSTC-dino_boneyard-multi-3
+frame_skip: 2
+max_episode_steps: 9000
+evaluation_max_episode_steps: 12000
+opponents: {}
+opponent_state: null
+training_states:
+  - training_scripts/data/states/dino_boneyard_multi_71.state
+  - training_scripts/data/states/dino_boneyard_multi_180.state
+  - training_scripts/data/states/dino_boneyard_multi_290.state
+eval_every_timesteps: 500000
+eval_episodes: 1
+checkpoint_every_timesteps: 500000
+record_video: false
+ppo:
+  learning_rate: 0.0003
+  n_steps: 2048
+  batch_size: 256
+  n_epochs: 10
+  gamma: 0.9975
+  gae_lambda: 0.9747
+  clip_range: 0.2
+  ent_coef: 0.005
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  policy_layers: [128, 128]
+  value_layers: [128, 128]

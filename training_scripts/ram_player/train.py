@@ -25,6 +25,7 @@ from .common import (
     prepare_rom,
     require_all_opponent_slots,
     training_state_paths,
+    validate_model_action_space,
     validate_model_observation_space,
     write_run_metadata,
 )
@@ -170,6 +171,7 @@ def main() -> None:
                     tensorboard_log=str(run_dir / "tensorboard"),
                 )
                 validate_model_observation_space(model, resume_path)
+                validate_model_action_space(model, resume_path)
                 model.set_env(training_env)
             else:
                 model = PPO(

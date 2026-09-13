@@ -8,7 +8,9 @@ import numpy as np
 from HotWheelsGym.RAMOpponent import _is_white_respawn_frame
 from training_scripts.ram_player.callbacks import evaluate_ram_policy
 from training_scripts.ram_player.common import (
+    load_config,
     require_all_opponent_slots,
+    validate_model_action_space,
     validate_model_observation_space,
 )
 from training_scripts.ram_player.media import RGBVideoWriter
@@ -16,6 +18,24 @@ from training_scripts.ram_player.sweep import checkpoint_sort_key
 
 
 class RAMEvaluationToolTests(unittest.TestCase):
+    def test_ablation_configs_use_equal_raw_frame_budgets(self):
+        root = Path(__file__).resolve().parents[1] / "training_scripts" / "ram_player"
+        slow = load_config(root / "ablation_15hz.yml")
+        fast = load_config(root / "ablation_30hz.yml")
+
+        self.assertEqual(
+            int(slow["total_timesteps"]) * int(slow["frame_skip"]),
+            int(fast["total_timesteps"]) * int(fast["frame_skip"]),
+        )
+        self.assertEqual(
+            int(slow["evaluation_max_episode_steps"]) * int(slow["frame_skip"]),
+            int(fast["evaluation_max_episode_steps"]) * int(fast["frame_skip"]),
+        )
+        self.assertEqual(
+            int(slow["ppo"]["n_steps"]) * int(slow["frame_skip"]),
+            int(fast["ppo"]["n_steps"]) * int(fast["frame_skip"]),
+        )
+
     def test_evaluation_aggregates_track_quality_metrics(self):
         class OneStepEnv(gym.Env):
             observation_space = gym.spaces.Box(-1.0, 1.0, (60,), np.float32)
@@ -61,6 +81,21 @@ class RAMEvaluationToolTests(unittest.TestCase):
                         "ram_player_lap_1_frames": 4800,
                         "ram_player_lap_2_frames": 4500,
                         "ram_player_lap_3_frames": 4200,
+                        "ram_player_sector_02_entries": 3,
+                        "ram_player_sector_02_completed": 3,
+                        "ram_player_sector_02_frames": 120,
+                        "ram_player_sector_02_completed_frames": 120,
+                        "ram_player_sector_02_entry_speed_total": 150_000,
+                        "ram_player_sector_02_minimum_speed_total": 90_000,
+                        "ram_player_sector_02_exit_speed_total": 135_000,
+                        "ram_player_sector_02_wall_frames": 12,
+                        "ram_player_sector_02_skid_frames": 30,
+                        "ram_player_sector_02_boost_frames": 60,
+                        "ram_player_sector_02_jet_boost_frames": 90,
+                        "ram_player_sector_02_jet_boost_pickups": 2,
+                        "ram_player_lap_1_sector_02_frames": 42,
+                        "ram_player_lap_2_sector_02_frames": 39,
+                        "ram_player_lap_3_sector_02_frames": 36,
                     },
                 )
 
@@ -94,6 +129,20 @@ class RAMEvaluationToolTests(unittest.TestCase):
         self.assertEqual(result.mean_lap_1_seconds, 80.0)
         self.assertEqual(result.mean_lap_2_seconds, 75.0)
         self.assertEqual(result.mean_lap_3_seconds, 70.0)
+        self.assertAlmostEqual(result.sector_metrics["sector_02_seconds"], 2 / 3)
+        self.assertEqual(result.sector_metrics["sector_02_entry_speed"], 50_000)
+        self.assertEqual(result.sector_metrics["sector_02_minimum_speed"], 30_000)
+        self.assertEqual(result.sector_metrics["sector_02_exit_speed"], 45_000)
+        self.assertEqual(result.sector_metrics["sector_02_wall_contact_rate"], 0.1)
+        self.assertEqual(result.sector_metrics["sector_02_skid_active_rate"], 0.25)
+        self.assertEqual(result.sector_metrics["sector_02_boost_active_rate"], 0.5)
+        self.assertEqual(result.sector_metrics["sector_02_jet_boost_active_rate"], 0.75)
+        self.assertAlmostEqual(
+            result.sector_metrics["sector_02_jet_boost_pickup_rate"], 2 / 3
+        )
+        self.assertEqual(result.sector_metrics["lap_1_sector_02_seconds"], 42 / 60)
+        self.assertEqual(result.sector_metrics["lap_2_sector_02_seconds"], 39 / 60)
+        self.assertEqual(result.sector_metrics["lap_3_sector_02_seconds"], 36 / 60)
 
     def test_legacy_ram_checkpoint_gets_clear_observation_error(self):
         class LegacyModel:
@@ -168,6 +217,26 @@ class RAMEvaluationToolTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "observation-v4 checkpoint"):
             validate_model_observation_space(V4Model(), "v4_model.zip")
+
+    def test_v5_ram_checkpoint_gets_clear_factorized_action_migration_error(self):
+        class V5Model:
+            observation_space = type("Space", (), {"shape": (60,)})()
+
+        with self.assertRaisesRegex(ValueError, "observation-v5 checkpoint"):
+            validate_model_observation_space(V5Model(), "v5_model.zip")
+
+    def test_v5_action_space_gets_clear_factorized_action_error(self):
+        class V5Model:
+            action_space = gym.spaces.Discrete(7)
+
+        with self.assertRaisesRegex(ValueError, "v5 seven-action checkpoint"):
+            validate_model_action_space(V5Model(), "v5_model.zip")
+
+    def test_v6_action_space_is_accepted(self):
+        class V6Model:
+            action_space = gym.spaces.MultiDiscrete((4, 3, 2))
+
+        validate_model_action_space(V6Model(), "v6_model.zip")
 
     def test_white_respawn_frame_detection_rejects_normal_frames(self):
         normal = np.zeros((16, 16, 3), dtype=np.uint8)

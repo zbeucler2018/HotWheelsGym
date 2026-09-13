@@ -48,6 +48,13 @@ Watch it with:
 tensorboard --logdir training_scripts/ram_runs
 ```
 
+Before the first full v6 run, the checked-in `ablation_15hz.yml` and
+`ablation_30hz.yml` configurations compare four-frame and two-frame action
+repeat using approximately one million raw emulator frames apiece. The 30 Hz
+configuration doubles decision timesteps, episode horizons, and rollout length;
+its gamma and GAE lambda preserve approximately the same discount horizon in
+emulator time. Both use one start-line evaluation and skip video export.
+
 Each timestamped run contains:
 
 - TensorBoard PPO and `eval/*` metrics;
@@ -70,12 +77,15 @@ times appear as `mean_lap_1_seconds`,
 `mean_lap_2_seconds`, and `mean_lap_3_seconds` in TensorBoard and the evaluation
 CSV.
 
-The same evaluation measures the first Dino Boneyard hairpin at raw-frame
-resolution. This diagnostic sector spans progress 45 through 60 inclusive,
-immediately after the Jet Boost pickup near progress 43. TensorBoard and the CSV
-show sector time; entry, minimum, and exit speed; wall- and skid-frame rates;
-and the fraction of entries with Jet Boost active. These are diagnostics only:
-they do not change observation v5, the reward, or checkpoint selection.
+The same evaluation measures twelve full-lap sectors at raw-frame resolution.
+The boundaries are progress `0, 32, 45, 61, 92, 124, 156, 188, 220, 252, 284,
+316, 342`; sector 2 isolates the first hairpin immediately after the Jet Boost
+pickup near progress 43. TensorBoard and the CSV show each sector's time; entry,
+minimum, and exit speed; wall, skid, boost, and Jet Boost frame rates; and Jet
+Boost pickup rate. Sector times are also broken out by lap, which makes the
+standing-start deficit visible instead of averaging it into the rolling laps.
+The original hairpin metrics remain as a convenient focused view. These are
+diagnostics only and do not affect reward or checkpoint selection.
 
 After the environments close, the trainer automatically records one
 deterministic start-line race using `evaluation/best_model.zip`. The MP4 plays
@@ -83,10 +93,11 @@ at real-time speed (15 encoded frames per second for four-frame action repeat).
 Its JSON sidecar records final/mean boost charge, charge gained/spent, boost
 active frames, and handling/Jet Boost timing and pickup counts in addition to
 native skid timing, exact lap-split frames/seconds, race outcome, and
-track-quality metrics.
+track-quality metrics. The JSON sidecar also contains the derived twelve-sector
+summary.
 Pass `--no-record-video` only when this final recording is not wanted.
 
-## Validated project checkpoint (2026-09-10)
+## Validated project checkpoint (v3, 2026-09-10)
 
 The first boost-aware observation-v3 run completed from scratch against the
 stock opponents at 5 million PPO timesteps. A deterministic start-line sweep
@@ -135,17 +146,29 @@ respawn flashes are isolated so they no longer reset or blank Player 1's
 observation. A frozen model can already occupy all three opponent slots for
 evaluation; a learning self-play training run has not yet been performed.
 
-Recommended continuation:
+## Validated project checkpoint (v5, 2026-09-13)
 
-1. use the v5 hairpin diagnostics to identify missed Jet Boost pickups, wall
-   contact, skid, and speed loss without changing the observation or reward;
-2. train a fresh solo policy against the stock opponents, because v3
-   checkpoints cannot consume the new input shape;
-3. rank checkpoints over multiple start-line races, preferring reliable
-   zero-respawn finishes and then median finish time;
-4. perform a small portability audit on a track with different power-ups,
-   confirming its racer-local type/timer semantics and moving any track-specific
-   differences into configuration rather than duplicating the environment;
+The first skid-aware v5 run completed 5 million timesteps against stock
+opponents. A three-race deterministic sweep evaluated all 20 periodic
+checkpoints plus the final model. The retained 3,999,984-step checkpoint ran
+**4:27.48**, finished first with zero respawns, and produced lap splits of
+**1:33.88**, **1:28.10**, and **1:25.50**. The final model regressed to
+**4:29.85**, confirming that periodic checkpoint selection remains necessary.
+
+V6 is intentionally incompatible with that model. It replaces the coupled
+seven-action controller with steerable, factorized drive/steering/boost and
+expands the previous-action observation from seven to nine values. The v5
+checkpoint and video remain the comparison baseline while v6 trains from
+scratch.
+
+Current continuation:
+
+1. compare v6 at 15 Hz and 30 Hz using equal numbers of raw emulator frames;
+2. retain the faster learning configuration for a full solo run;
+3. use the new per-lap sector metrics to find where it loses time to v5 and the
+   supplied human references;
+4. optimize the worst sectors with targeted start states or action-sequence
+   search before introducing self-play;
 5. introduce a frozen-checkpoint opponent pool only after the solo policy can
    repeat clean races near or below the pixel baseline.
 
@@ -167,7 +190,7 @@ directory; videos are intentionally not encoded as TensorBoard images.
 
 ## Observation and action contract
 
-Every controlled racer—Player 1 or an opponent—gets the same 60 normalized
+Every controlled racer—Player 1 or an opponent—gets the same 62 normalized
 floats, rotated so that racer is always the observation's ego:
 
 - heading sine/cosine, absolute Dino X/Z, speed, boost charge, normalized
@@ -177,7 +200,7 @@ floats, rotated so that racer is always the observation's ego:
 - signed centerline offset and heading error relative to the road;
 - ego-relative directions to short, medium, and long lookahead points;
 - medium- and long-range signed track curvature;
-- a seven-value one-hot encoding of the previous action;
+- nine one-hot values encoding the previous drive, steering, and boost choices;
 - for the three nearest racers: ego-frame forward/right/distance, relative
   total progress, speed, boost charge, heading sine/cosine, and relative lap.
 
@@ -187,7 +210,7 @@ or images are stored. Each live racer is projected onto nearby reference-line
 segments, so Player 1 and every model opponent get the same local geometry even
 when they occupy different parts of the track.
 
-This is observation contract version 5. The racer-local boost meter at `+0xF0`
+This is observation contract version 6. The racer-local boost meter at `+0xF0`
 is normalized from 0 to its maximum of 980. The same offset was verified against
 the configured Player 1 boost address on every bundled multiplayer track and
 against all four Dino racer objects. The neighboring `+0xEC` field is only a
@@ -212,11 +235,11 @@ frames; forcing the byte low reached 62 with 14 wall frames, while forcing it
 high reached 56 with 26 wall frames. It therefore carries causal native physics
 state rather than being only an animation flag or a duplicate power-up field.
 
-Previous 43-input v1, 54-input v2, 58-input v3, and 59-input v4 checkpoints are
-intentionally incompatible:
+Previous 43-input v1, 54-input v2, 58-input v3, 59-input v4, and 60-input v5
+checkpoints are intentionally incompatible:
 their neural-network input layers cannot accept the new features. The tools
-detect all four formats and report a clear migration error. Train the first v5
-model from scratch; subsequent v5 checkpoints can be used symmetrically for
+detect all five formats and report a clear migration error. Train the first v6
+model from scratch; subsequent v6 checkpoints can be used symmetrically for
 self-play. Other tracks' power-up types still need a portability audit before
 their effects are added to this Dino-specific contract.
 
@@ -226,21 +249,18 @@ new Player 1 respawn. Evaluation logs mean lateral error, heading alignment,
 wall-contact rate, native skid-frame rate, and respawns alongside finish time,
 completion, and rank.
 
-There are seven discrete actions:
+The action space is `MultiDiscrete(4, 3, 2)` with independent components:
 
-| Index | Intent | Player 1 and opponent buttons |
-| ---: | --- | --- | --- |
-| 0 | coast | none |
-| 1 | accelerate | A |
-| 2 | accelerate left | A + Left |
-| 3 | accelerate right | A + Right |
-| 4 | brake | B |
-| 5 | accelerate/up | A + Up |
-| 6 | boost while accelerating | A + L + R |
+| Component | Values | Player 1 and opponent buttons |
+| --- | --- | --- |
+| drive | coast / accelerate / brake / accelerate-up | none / A / B / A+Up |
+| steering | straight / left / right | none / Left / Right |
+| boost | off / on | none / L+R |
 
-The game's boost chord itself is **L+R**. The shared controller action also
-holds **A** so choosing boost does not release the accelerator; this is why the
-policy metadata records `A + L + R`.
+The game's boost chord itself is **L+R**. Because boost is independent, the
+policy can use pure L+R, keep A held with A+L+R, and steer left or right during
+either form. All 24 combinations pass through the same native Player 1 button
+path for Player 1 and converted opponents.
 
 The native-button ROM makes all four race slots genuine player-class racers.
 Player 1 continues sampling the hardware keypad; slots 1–3 instead retain the

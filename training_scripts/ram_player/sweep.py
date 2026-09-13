@@ -7,7 +7,6 @@ import csv
 import json
 import re
 import shutil
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -15,11 +14,12 @@ from typing import Any
 from stable_baselines3 import PPO
 from torch.utils.tensorboard import SummaryWriter
 
-from .callbacks import evaluate_ram_policy
+from .callbacks import evaluate_ram_policy, evaluation_values
 from .common import (
     load_config,
     make_ram_env,
     prepare_rom,
+    validate_model_action_space,
     validate_model_observation_space,
 )
 from .record import record_model
@@ -146,6 +146,7 @@ def main() -> None:
         for steps, label, model_path in candidates:
             model = PPO.load(model_path, device=args.device)
             validate_model_observation_space(model, model_path)
+            validate_model_action_space(model, model_path)
             result = evaluate_ram_policy(
                 model,
                 env,
@@ -156,10 +157,10 @@ def main() -> None:
                 "label": label,
                 "timesteps": steps,
                 "model_path": str(model_path.resolve()),
-                **asdict(result),
+                **evaluation_values(result),
             }
             rows.append(row)
-            for name, value in asdict(result).items():
+            for name, value in evaluation_values(result).items():
                 writer.add_scalar(f"checkpoint_sweep/{name}", value, steps)
             writer.flush()
             time_text = (

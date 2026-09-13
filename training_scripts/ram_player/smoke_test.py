@@ -76,8 +76,14 @@ def main() -> None:
     )
     try:
         observation, info = env.reset(seed=int(config["seed"]))
+        actions = (
+            (1, 0, 0),
+            (1, 1, 0),
+            (1, 2, 1),
+            (0, 0, 1),
+        )
         for step in range(args.steps):
-            action = (1, 2, 1, 3)[step % 4]
+            action = actions[step % len(actions)]
             observation, _, terminated, truncated, info = env.step(action)
             if terminated or truncated:
                 break
@@ -85,7 +91,8 @@ def main() -> None:
             raise RuntimeError("RAM observation is outside its declared space")
         print(
             f"OK: ROM={active_rom.name} observation={observation.shape} "
-            f"actions={env.action_space.n} progress={info['ram_player_progress']} "
+            f"actions=MultiDiscrete{tuple(env.action_space.nvec)} "
+            f"progress={info['ram_player_progress']} "
             f"rank={info['ram_player_rank']} boost={info['ram_player_boost']} "
             f"jet_boost={info['ram_player_jet_boost_remaining']} "
             f"skid={int(info['ram_player_skid_active'])}"

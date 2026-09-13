@@ -3,13 +3,42 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from statistics import fmean
 from typing import Any
 
 import gymnasium as gym
 from stable_baselines3.common.callbacks import BaseCallback
+
+from HotWheelsGym.ram_opponent_control import DINO_SECTOR_COUNT
+
+SECTOR_TOTAL_FIELDS = (
+    "entries",
+    "completed",
+    "frames",
+    "completed_frames",
+    "entry_speed_total",
+    "minimum_speed_total",
+    "exit_speed_total",
+    "wall_frames",
+    "skid_frames",
+    "boost_frames",
+    "jet_boost_frames",
+    "jet_boost_pickups",
+)
+SECTOR_METRIC_SUFFIXES = (
+    "completions_per_episode",
+    "seconds",
+    "entry_speed",
+    "minimum_speed",
+    "exit_speed",
+    "wall_contact_rate",
+    "skid_active_rate",
+    "boost_active_rate",
+    "jet_boost_active_rate",
+    "jet_boost_pickup_rate",
+)
 
 
 @dataclass(frozen=True)
@@ -45,6 +74,132 @@ class RAMEvaluation:
     mean_lap_2_seconds: float
     mean_lap_3_seconds: float
     selection_score: float
+    sector_metrics: dict[str, float]
+
+
+def _empty_sector_totals() -> dict[str, list[float]]:
+    return {name: [0.0] * DINO_SECTOR_COUNT for name in SECTOR_TOTAL_FIELDS}
+
+
+def _accumulate_sector_info(
+    totals: dict[str, list[float]], info: dict[str, Any]
+) -> None:
+    for sector in range(DINO_SECTOR_COUNT):
+        for name in SECTOR_TOTAL_FIELDS:
+            totals[name][sector] += float(
+                info.get(f"ram_player_sector_{sector:02d}_{name}", 0)
+            )
+
+
+def _sector_metrics(totals: dict[str, list[float]], episodes: int) -> dict[str, float]:
+    metrics: dict[str, float] = {}
+    for sector in range(DINO_SECTOR_COUNT):
+        prefix = f"sector_{sector:02d}_"
+        entries = totals["entries"][sector]
+        completed = totals["completed"][sector]
+        frames = totals["frames"][sector]
+        metrics.update(
+            {
+                f"{prefix}completions_per_episode": completed / max(1, episodes),
+                f"{prefix}seconds": (
+                    totals["completed_frames"][sector] / max(1.0, completed) / 60.0
+                ),
+                f"{prefix}entry_speed": (
+                    totals["entry_speed_total"][sector] / max(1.0, entries)
+                ),
+                f"{prefix}minimum_speed": (
+                    totals["minimum_speed_total"][sector] / max(1.0, completed)
+                ),
+                f"{prefix}exit_speed": (
+                    totals["exit_speed_total"][sector] / max(1.0, completed)
+                ),
+                f"{prefix}wall_contact_rate": (
+                    totals["wall_frames"][sector] / max(1.0, frames)
+                ),
+                f"{prefix}skid_active_rate": (
+                    totals["skid_frames"][sector] / max(1.0, frames)
+                ),
+                f"{prefix}boost_active_rate": (
+                    totals["boost_frames"][sector] / max(1.0, frames)
+                ),
+                f"{prefix}jet_boost_active_rate": (
+                    totals["jet_boost_frames"][sector] / max(1.0, frames)
+                ),
+                f"{prefix}jet_boost_pickup_rate": (
+                    totals["jet_boost_pickups"][sector] / max(1.0, entries)
+                ),
+            }
+        )
+    return metrics
+
+
+def _empty_lap_sector_values() -> dict[int, list[float]]:
+    return {lap: [0.0] * DINO_SECTOR_COUNT for lap in (1, 2, 3)}
+
+
+def _accumulate_lap_sector_info(
+    frame_totals: dict[int, list[float]],
+    samples: dict[int, list[float]],
+    info: dict[str, Any],
+) -> None:
+    for lap in frame_totals:
+        for sector in range(DINO_SECTOR_COUNT):
+            frames = float(
+                info.get(f"ram_player_lap_{lap}_sector_{sector:02d}_frames", 0)
+            )
+            if frames > 0:
+                frame_totals[lap][sector] += frames
+                samples[lap][sector] += 1
+
+
+def _lap_sector_metrics(
+    frame_totals: dict[int, list[float]], samples: dict[int, list[float]]
+) -> dict[str, float]:
+    return {
+        f"lap_{lap}_sector_{sector:02d}_seconds": (
+            frame_totals[lap][sector] / max(1.0, samples[lap][sector]) / 60.0
+        )
+        for lap in frame_totals
+        for sector in range(DINO_SECTOR_COUNT)
+    }
+
+
+def sector_metrics_from_info(info: dict[str, Any]) -> dict[str, float]:
+    """Return derived full-track sector metrics for one completed episode."""
+
+    totals = _empty_sector_totals()
+    _accumulate_sector_info(totals, info)
+    frame_totals = _empty_lap_sector_values()
+    samples = _empty_lap_sector_values()
+    _accumulate_lap_sector_info(frame_totals, samples, info)
+    return {
+        **_sector_metrics(totals, 1),
+        **_lap_sector_metrics(frame_totals, samples),
+    }
+
+
+def evaluation_metric_names() -> tuple[str, ...]:
+    scalar_names = tuple(
+        item.name for item in fields(RAMEvaluation) if item.name != "sector_metrics"
+    )
+    sector_names = tuple(
+        f"sector_{sector:02d}_{suffix}"
+        for sector in range(DINO_SECTOR_COUNT)
+        for suffix in SECTOR_METRIC_SUFFIXES
+    )
+    lap_sector_names = tuple(
+        f"lap_{lap}_sector_{sector:02d}_seconds"
+        for lap in (1, 2, 3)
+        for sector in range(DINO_SECTOR_COUNT)
+    )
+    return scalar_names + sector_names + lap_sector_names
+
+
+def evaluation_values(result: RAMEvaluation) -> dict[str, float]:
+    values = asdict(result)
+    sector_metrics = values.pop("sector_metrics")
+    values.update(sector_metrics)
+    return values
 
 
 def evaluate_ram_policy(
@@ -89,6 +244,9 @@ def evaluate_ram_policy(
     hairpin_wall_frames = 0
     hairpin_skid_frames = 0
     lap_splits: dict[int, list[float]] = {lap: [] for lap in (1, 2, 3)}
+    sector_totals = _empty_sector_totals()
+    lap_sector_frame_totals = _empty_lap_sector_values()
+    lap_sector_samples = _empty_lap_sector_values()
     scores: list[float] = []
 
     for _ in range(episodes):
@@ -197,6 +355,8 @@ def evaluate_ram_policy(
             split_frames = int(info.get(f"ram_player_lap_{lap}_frames", 0))
             if split_frames > 0:
                 lap_splits[lap].append(split_frames / 60.0)
+        _accumulate_sector_info(sector_totals, info)
+        _accumulate_lap_sector_info(lap_sector_frame_totals, lap_sector_samples, info)
         scores.append(score)
 
     return RAMEvaluation(
@@ -237,6 +397,10 @@ def evaluate_ram_policy(
         mean_lap_2_seconds=fmean(lap_splits[2]) if lap_splits[2] else 0.0,
         mean_lap_3_seconds=fmean(lap_splits[3]) if lap_splits[3] else 0.0,
         selection_score=fmean(scores),
+        sector_metrics={
+            **_sector_metrics(sector_totals, episodes),
+            **_lap_sector_metrics(lap_sector_frame_totals, lap_sector_samples),
+        },
     )
 
 
@@ -268,42 +432,7 @@ class RAMEvalCallback(BaseCallback):
         self.output_dir.mkdir(parents=True, exist_ok=True)
         if not self.csv_path.exists():
             with self.csv_path.open("w", newline="") as handle:
-                csv.writer(handle).writerow(
-                    (
-                        "timesteps",
-                        "mean_reward",
-                        "mean_length",
-                        "mean_completion",
-                        "finish_rate",
-                        "mean_finish_frames",
-                        "mean_speed",
-                        "mean_rank",
-                        "mean_abs_lateral_offset",
-                        "mean_heading_alignment",
-                        "wall_contact_rate",
-                        "mean_respawns",
-                        "mean_boost_charge",
-                        "mean_boost_spent",
-                        "mean_boost_gained",
-                        "boost_active_rate",
-                        "mean_jet_boost_remaining",
-                        "jet_boost_active_rate",
-                        "mean_jet_boost_pickups",
-                        "skid_active_rate",
-                        "mean_hairpin_completions",
-                        "mean_hairpin_seconds",
-                        "mean_hairpin_entry_speed",
-                        "mean_hairpin_minimum_speed",
-                        "mean_hairpin_exit_speed",
-                        "hairpin_wall_contact_rate",
-                        "hairpin_skid_active_rate",
-                        "hairpin_jet_boost_entry_rate",
-                        "mean_lap_1_seconds",
-                        "mean_lap_2_seconds",
-                        "mean_lap_3_seconds",
-                        "selection_score",
-                    )
-                )
+                csv.writer(handle).writerow(("timesteps", *evaluation_metric_names()))
 
     def _record_evaluation(self) -> None:
         result = evaluate_ram_policy(
@@ -312,39 +441,7 @@ class RAMEvalCallback(BaseCallback):
             self.episodes,
             max_episode_frames=self.max_episode_frames,
         )
-        values = {
-            "mean_reward": result.mean_reward,
-            "mean_length": result.mean_length,
-            "mean_completion": result.mean_completion,
-            "finish_rate": result.finish_rate,
-            "mean_finish_frames": result.mean_finish_frames,
-            "mean_speed": result.mean_speed,
-            "mean_rank": result.mean_rank,
-            "mean_abs_lateral_offset": result.mean_abs_lateral_offset,
-            "mean_heading_alignment": result.mean_heading_alignment,
-            "wall_contact_rate": result.wall_contact_rate,
-            "mean_respawns": result.mean_respawns,
-            "mean_boost_charge": result.mean_boost_charge,
-            "mean_boost_spent": result.mean_boost_spent,
-            "mean_boost_gained": result.mean_boost_gained,
-            "boost_active_rate": result.boost_active_rate,
-            "mean_jet_boost_remaining": result.mean_jet_boost_remaining,
-            "jet_boost_active_rate": result.jet_boost_active_rate,
-            "mean_jet_boost_pickups": result.mean_jet_boost_pickups,
-            "skid_active_rate": result.skid_active_rate,
-            "mean_hairpin_completions": result.mean_hairpin_completions,
-            "mean_hairpin_seconds": result.mean_hairpin_seconds,
-            "mean_hairpin_entry_speed": result.mean_hairpin_entry_speed,
-            "mean_hairpin_minimum_speed": result.mean_hairpin_minimum_speed,
-            "mean_hairpin_exit_speed": result.mean_hairpin_exit_speed,
-            "hairpin_wall_contact_rate": result.hairpin_wall_contact_rate,
-            "hairpin_skid_active_rate": result.hairpin_skid_active_rate,
-            "hairpin_jet_boost_entry_rate": result.hairpin_jet_boost_entry_rate,
-            "mean_lap_1_seconds": result.mean_lap_1_seconds,
-            "mean_lap_2_seconds": result.mean_lap_2_seconds,
-            "mean_lap_3_seconds": result.mean_lap_3_seconds,
-            "selection_score": result.selection_score,
-        }
+        values = evaluation_values(result)
         for name, value in values.items():
             self.logger.record(f"eval/{name}", value)
         self.logger.dump(self.num_timesteps)
