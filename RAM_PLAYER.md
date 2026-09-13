@@ -161,14 +161,46 @@ expands the previous-action observation from seven to nine values. The v5
 checkpoint and video remain the comparison baseline while v6 trains from
 scratch.
 
+## Validated v6 action-frequency ablation (2026-09-13)
+
+The factorized v6 controller was smoke-tested and then trained from scratch at
+15 Hz and 30 Hz against stock opponents. Both candidates used seed `2026` and
+the same effective budget of `1,007,616` raw emulator frames. The 30 Hz run
+doubled its decision timesteps and adjusted its rollout and discount horizons
+to keep the comparison in emulator time. One deterministic start-line race was
+evaluated at the endpoint of each short run:
+
+| Candidate | Best step | Three-lap time | Lap splits | Respawns | Skid rate | Hairpin | Jet Boost pickups |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| 15 Hz / frame skip 4 | 250,002 | **4:42.80** | 1:38.13 / 1:33.90 / 1:30.77 | 1 | 2.80% | 5.69 s | 0 |
+| 30 Hz / frame skip 2 | 500,001 | 4:47.50 | 1:38.23 / 1:36.27 / 1:33.00 | 4 | 4.17% | **5.28 s** | 0 |
+
+The 15 Hz candidate won by `4.70` seconds and required roughly half as many
+policy decisions and PPO samples. The 30 Hz controller was `0.42` seconds
+faster through sector 2's hairpin, showing that finer timing can help locally,
+but it lost approximately `1.45` seconds in sector 6 and `2.89` seconds in
+sector 10. It also respawned four times and skidded more. Neither learned to
+collect the Jet Boost pickup. Because each result is a single deterministic
+evaluation, the comparison is directional rather than a statistical claim;
+the performance and compute-cost difference is nevertheless large enough to
+retain 15 Hz for the next full run.
+
+The ignored run artifacts are under:
+
+```text
+training_scripts/ram_runs/dino_ram_factorized_v6_ablation_15hz_20260913T072652Z/
+training_scripts/ram_runs/dino_ram_factorized_v6_ablation_30hz_20260913T081312Z/
+```
+
 Current continuation:
 
-1. compare v6 at 15 Hz and 30 Hz using equal numbers of raw emulator frames;
-2. retain the faster learning configuration for a full solo run;
-3. use the new per-lap sector metrics to find where it loses time to v5 and the
+1. train v6 at 15 Hz for a full solo run against stock opponents;
+2. sweep its periodic checkpoints with multiple deterministic races rather
+   than trusting the final policy;
+3. use the per-lap sector metrics to find where it loses time to v5 and the
    supplied human references;
 4. optimize the worst sectors with targeted start states or action-sequence
-   search before introducing self-play;
+   search, with Jet Boost pickup acquisition as an explicit diagnostic target;
 5. introduce a frozen-checkpoint opponent pool only after the solo policy can
    repeat clean races near or below the pixel baseline.
 
