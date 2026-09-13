@@ -379,7 +379,6 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         info["ram_player_jet_boost_acquired"] = jet_boost_acquired
         info["ram_player_jet_boost_pickups"] = self._jet_boost_pickups
         info.update(_hairpin_info(self._hairpin))
-        info.update(_sector_info(self._sectors))
         return self._observation(), reward, terminated, truncated, info
 
 
@@ -444,6 +443,9 @@ class RAMActionRepeat(gym.Wrapper):
         info["ram_decision_jet_boost_frames"] = jet_boost_frames
         info["ram_decision_jet_boost_pickups"] = jet_boost_pickups
         info["ram_decision_skid_frames"] = skid_frames
+        sectors = getattr(self.env, "_sectors", None)
+        if isinstance(sectors, DinoSectorTelemetry):
+            info.update(_sector_info(sectors))
         return observation, total_reward, terminated, truncated, info
 
 
