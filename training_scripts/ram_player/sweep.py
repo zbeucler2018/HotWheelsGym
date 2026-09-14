@@ -141,6 +141,7 @@ def main() -> None:
         frame_skip=frame_skip,
         max_episode_steps=args.max_episode_steps,
         seed=int(config["seed"]) + 40_000,
+        reward_config=config.get("reward"),
     )
     try:
         for steps, label, model_path in candidates:

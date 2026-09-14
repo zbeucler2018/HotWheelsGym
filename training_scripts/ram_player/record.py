@@ -12,6 +12,7 @@ from stable_baselines3 import PPO
 from HotWheelsGym.ram_opponent_control import (
     DINO_SECTOR_BOUNDARIES,
     DINO_SECTOR_COUNT,
+    RAM_ACTION_METRIC_NAMES,
 )
 
 from .callbacks import SECTOR_METRIC_SUFFIXES, sector_metrics_from_info
@@ -54,6 +55,7 @@ def record_model(
         seed=int(config["seed"]) + 30_000,
         opponent_paths=opponent_paths,
         state_path=(str(opponent_state_path(config)) if opponent_paths else None),
+        reward_config=config.get("reward"),
     )
     model = PPO.load(model_path, device=device)
     validate_model_observation_space(model, model_path)
@@ -98,6 +100,18 @@ def record_model(
         env.close()
 
     sector_metrics = sector_metrics_from_info(info)
+    race_action_frames = {
+        name: sum(
+            int(
+                info.get(
+                    f"ram_player_sector_{sector:02d}_action_{name}_frames",
+                    0,
+                )
+            )
+            for sector in range(DINO_SECTOR_COUNT)
+        )
+        for name in RAM_ACTION_METRIC_NAMES
+    }
     result = {
         "environment": ENV_ID,
         "model": str(model_path),
@@ -126,6 +140,10 @@ def record_model(
         "jet_boost_pickups": jet_boost_pickups,
         "skid_active_frames": skid_active_frames,
         "skid_active_rate": skid_active_frames / max(1, observed_frames),
+        "action_rates": {
+            name: frames / max(1, observed_frames)
+            for name, frames in race_action_frames.items()
+        },
         "hairpin": {
             "entries": int(info.get("ram_player_hairpin_entries", 0)),
             "completed": int(info.get("ram_player_hairpin_completed", 0)),
@@ -144,6 +162,47 @@ def record_model(
             ),
             "wall_frames": int(info.get("ram_player_hairpin_wall_frames", 0)),
             "skid_frames": int(info.get("ram_player_hairpin_skid_frames", 0)),
+            "action_rates": {
+                name: int(info.get(f"ram_player_hairpin_action_{name}_frames", 0))
+                / max(1, int(info.get("ram_player_hairpin_frames", 0)))
+                for name in RAM_ACTION_METRIC_NAMES
+            },
+            "jet_boost_action_rates": {
+                name: int(
+                    info.get(
+                        f"ram_player_hairpin_jet_boost_action_{name}_frames",
+                        0,
+                    )
+                )
+                / max(
+                    1,
+                    int(
+                        info.get(
+                            "ram_player_hairpin_condition_jet_boost_frames",
+                            0,
+                        )
+                    ),
+                )
+                for name in RAM_ACTION_METRIC_NAMES
+            },
+            "no_jet_boost_action_rates": {
+                name: int(
+                    info.get(
+                        f"ram_player_hairpin_no_jet_boost_action_{name}_frames",
+                        0,
+                    )
+                )
+                / max(
+                    1,
+                    int(
+                        info.get(
+                            "ram_player_hairpin_condition_no_jet_boost_frames",
+                            0,
+                        )
+                    ),
+                )
+                for name in RAM_ACTION_METRIC_NAMES
+            },
         },
         "sectors": [
             {

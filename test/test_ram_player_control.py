@@ -91,6 +91,27 @@ class RAMPlayerControlTests(unittest.TestCase):
         self.assertAlmostEqual(pose.lateral_offset, 0.0, places=6)
         self.assertTrue(all(-1.0 <= value <= 1.0 for value in pose.features))
 
+    def test_continuous_progress_resolves_motion_inside_one_checkpoint(self):
+        race = npc.RaceMemory(state_memory(self.state_path))
+        state = race.state(0)
+        start = track.DINO_BONEYARD_CENTERLINE[100]
+        end = track.DINO_BONEYARD_CENTERLINE[101]
+
+        def point(fraction):
+            return replace(
+                state,
+                progress=100,
+                x=round(start[0] + fraction * (end[0] - start[0])),
+                z=round(start[1] + fraction * (end[1] - start[1])),
+            )
+
+        delta = track.dino_continuous_progress_delta(
+            ram.dino_track_pose(point(0.25)),
+            ram.dino_track_pose(point(0.75)),
+            native_advance=0,
+        )
+        self.assertAlmostEqual(delta, 0.5, places=4)
+
     def test_track_observation_names_are_part_of_shared_contract(self):
         expected = {
             "track_lateral_offset",
@@ -379,7 +400,13 @@ class RAMPlayerControlTests(unittest.TestCase):
             (state(60, 70), state(61, 90, jet_boost=134), False),
         )
         for previous, current, hit_wall in transitions:
-            telemetry.update(previous, current, advance=1, hit_wall=hit_wall)
+            telemetry.update(
+                previous,
+                current,
+                advance=1,
+                hit_wall=hit_wall,
+                action=(2, 1, 1),
+            )
 
         self.assertEqual(telemetry.entries, 1)
         self.assertEqual(telemetry.completed, 1)
@@ -392,6 +419,11 @@ class RAMPlayerControlTests(unittest.TestCase):
         self.assertEqual(telemetry.exit_speed_total, 90)
         self.assertEqual(telemetry.wall_frames, 1)
         self.assertEqual(telemetry.skid_frames, 1)
+        self.assertEqual(telemetry.action_frames["drive_brake"], 3)
+        self.assertEqual(telemetry.action_frames["steer_left"], 3)
+        self.assertEqual(telemetry.action_frames["boost_on"], 3)
+        self.assertEqual(telemetry.jet_boost_action_frames["drive_brake"], 3)
+        self.assertEqual(telemetry.no_jet_boost_action_frames["drive_brake"], 0)
         self.assertFalse(telemetry.active)
 
     def test_hairpin_tracker_ignores_wrong_way_boundary_crossing(self):
@@ -440,6 +472,7 @@ class RAMPlayerControlTests(unittest.TestCase):
             hit_wall=True,
             boost_active=True,
             jet_boost_acquired=True,
+            action=(2, 1, 1),
         )
         telemetry.update(
             state(45, 90),
@@ -448,6 +481,7 @@ class RAMPlayerControlTests(unittest.TestCase):
             hit_wall=False,
             boost_active=False,
             jet_boost_acquired=False,
+            action=(1, 2, 0),
         )
         telemetry.update(
             state(60, 70),
@@ -456,6 +490,7 @@ class RAMPlayerControlTests(unittest.TestCase):
             hit_wall=False,
             boost_active=False,
             jet_boost_acquired=False,
+            action=(1, 0, 0),
         )
 
         self.assertEqual(telemetry.completed[1], 1)
@@ -468,6 +503,9 @@ class RAMPlayerControlTests(unittest.TestCase):
         self.assertEqual(telemetry.skid_frames[2], 1)
         self.assertEqual(telemetry.boost_frames[2], 1)
         self.assertEqual(telemetry.jet_boost_pickups[2], 1)
+        self.assertEqual(telemetry.action_frames["drive_brake"][2], 1)
+        self.assertEqual(telemetry.action_frames["drive_accel"][2], 1)
+        self.assertEqual(telemetry.action_frames["boost_on"][2], 1)
         self.assertEqual(telemetry.lap_completed_frames[(1, 2)], 2)
 
     def test_finished_race_reward_beats_partial_progress(self):
@@ -500,6 +538,42 @@ class RAMPlayerControlTests(unittest.TestCase):
             respawned_now=True,
         )
         self.assertAlmostEqual(safe - unsafe, 2.055, places=6)
+
+    def test_time_trial_reward_values_progress_and_elapsed_frames(self):
+        config = ram.RaceRewardConfig.from_mapping({"mode": "time_trial"})
+        slow = ram.time_trial_race_reward(
+            0.1,
+            previous_rank=2,
+            current_rank=2,
+            config=config,
+        )
+        fast = ram.time_trial_race_reward(
+            0.5,
+            previous_rank=2,
+            current_rank=2,
+            config=config,
+        )
+        collision = ram.time_trial_race_reward(
+            0.5,
+            previous_rank=2,
+            current_rank=2,
+            hit_wall=True,
+            config=config,
+        )
+
+        self.assertAlmostEqual(slow, 0.08)
+        self.assertAlmostEqual(fast, 0.48)
+        self.assertAlmostEqual(fast - collision, 0.1)
+
+    def test_time_trial_reward_allows_forward_racing_angles(self):
+        parameters = {
+            "previous_rank": 2,
+            "current_rank": 2,
+            "config": ram.RaceRewardConfig(mode="time_trial"),
+        }
+        straight = ram.time_trial_race_reward(0.25, heading_alignment=1.0, **parameters)
+        angled = ram.time_trial_race_reward(0.25, heading_alignment=0.2, **parameters)
+        self.assertEqual(straight, angled)
 
 
 if __name__ == "__main__":

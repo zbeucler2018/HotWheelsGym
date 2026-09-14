@@ -11,7 +11,10 @@ from typing import Any
 import gymnasium as gym
 from stable_baselines3.common.callbacks import BaseCallback
 
-from HotWheelsGym.ram_opponent_control import DINO_SECTOR_COUNT
+from HotWheelsGym.ram_opponent_control import (
+    DINO_SECTOR_COUNT,
+    RAM_ACTION_METRIC_NAMES,
+)
 
 SECTOR_TOTAL_FIELDS = (
     "entries",
@@ -26,7 +29,7 @@ SECTOR_TOTAL_FIELDS = (
     "boost_frames",
     "jet_boost_frames",
     "jet_boost_pickups",
-)
+) + tuple(f"action_{name}_frames" for name in RAM_ACTION_METRIC_NAMES)
 SECTOR_METRIC_SUFFIXES = (
     "completions_per_episode",
     "seconds",
@@ -38,6 +41,17 @@ SECTOR_METRIC_SUFFIXES = (
     "boost_active_rate",
     "jet_boost_active_rate",
     "jet_boost_pickup_rate",
+) + tuple(f"action_{name}_rate" for name in RAM_ACTION_METRIC_NAMES)
+
+HAIRPIN_ACTION_GROUPS = ("all", "jet", "nojet")
+HAIRPIN_INFO_PREFIXES = {"all": "", "jet": "jet_boost_", "nojet": "no_jet_boost_"}
+ACTION_METRIC_NAMES = tuple(
+    [f"race_{name}_rate" for name in RAM_ACTION_METRIC_NAMES]
+    + [
+        f"hairpin_{group}_{name}_rate"
+        for group in HAIRPIN_ACTION_GROUPS
+        for name in RAM_ACTION_METRIC_NAMES
+    ]
 )
 
 
@@ -74,6 +88,7 @@ class RAMEvaluation:
     mean_lap_2_seconds: float
     mean_lap_3_seconds: float
     selection_score: float
+    action_metrics: dict[str, float]
     sector_metrics: dict[str, float]
 
 
@@ -130,6 +145,10 @@ def _sector_metrics(totals: dict[str, list[float]], episodes: int) -> dict[str, 
                 ),
             }
         )
+        for name in RAM_ACTION_METRIC_NAMES:
+            metrics[f"{prefix}action_{name}_rate"] = totals[f"action_{name}_frames"][
+                sector
+            ] / max(1.0, frames)
     return metrics
 
 
@@ -180,7 +199,9 @@ def sector_metrics_from_info(info: dict[str, Any]) -> dict[str, float]:
 
 def evaluation_metric_names() -> tuple[str, ...]:
     scalar_names = tuple(
-        item.name for item in fields(RAMEvaluation) if item.name != "sector_metrics"
+        item.name
+        for item in fields(RAMEvaluation)
+        if item.name not in {"action_metrics", "sector_metrics"}
     )
     sector_names = tuple(
         f"sector_{sector:02d}_{suffix}"
@@ -192,12 +213,14 @@ def evaluation_metric_names() -> tuple[str, ...]:
         for lap in (1, 2, 3)
         for sector in range(DINO_SECTOR_COUNT)
     )
-    return scalar_names + sector_names + lap_sector_names
+    return scalar_names + ACTION_METRIC_NAMES + sector_names + lap_sector_names
 
 
 def evaluation_values(result: RAMEvaluation) -> dict[str, float]:
     values = asdict(result)
+    action_metrics = values.pop("action_metrics")
     sector_metrics = values.pop("sector_metrics")
+    values.update(action_metrics)
     values.update(sector_metrics)
     return values
 
@@ -248,6 +271,11 @@ def evaluate_ram_policy(
     lap_sector_frame_totals = _empty_lap_sector_values()
     lap_sector_samples = _empty_lap_sector_values()
     scores: list[float] = []
+    hairpin_action_totals = {
+        group: dict.fromkeys(RAM_ACTION_METRIC_NAMES, 0.0)
+        for group in HAIRPIN_ACTION_GROUPS
+    }
+    hairpin_condition_frames = dict.fromkeys(HAIRPIN_ACTION_GROUPS, 0.0)
 
     for _ in range(episodes):
         observation, _ = env.reset()
@@ -351,6 +379,24 @@ def evaluate_ram_policy(
         )
         hairpin_wall_frames += int(info.get("ram_player_hairpin_wall_frames", 0))
         hairpin_skid_frames += int(info.get("ram_player_hairpin_skid_frames", 0))
+        hairpin_condition_frames["all"] += float(
+            info.get("ram_player_hairpin_frames", 0)
+        )
+        hairpin_condition_frames["jet"] += float(
+            info.get("ram_player_hairpin_condition_jet_boost_frames", 0)
+        )
+        hairpin_condition_frames["nojet"] += float(
+            info.get("ram_player_hairpin_condition_no_jet_boost_frames", 0)
+        )
+        for group in HAIRPIN_ACTION_GROUPS:
+            prefix = HAIRPIN_INFO_PREFIXES[group]
+            for name in RAM_ACTION_METRIC_NAMES:
+                hairpin_action_totals[group][name] += float(
+                    info.get(
+                        f"ram_player_hairpin_{prefix}action_{name}_frames",
+                        0,
+                    )
+                )
         for lap in lap_splits:
             split_frames = int(info.get(f"ram_player_lap_{lap}_frames", 0))
             if split_frames > 0:
@@ -397,6 +443,23 @@ def evaluate_ram_policy(
         mean_lap_2_seconds=fmean(lap_splits[2]) if lap_splits[2] else 0.0,
         mean_lap_3_seconds=fmean(lap_splits[3]) if lap_splits[3] else 0.0,
         selection_score=fmean(scores),
+        action_metrics={
+            **{
+                f"race_{name}_rate": (
+                    sum(sector_totals[f"action_{name}_frames"])
+                    / max(1.0, sum(sector_totals["frames"]))
+                )
+                for name in RAM_ACTION_METRIC_NAMES
+            },
+            **{
+                f"hairpin_{group}_{name}_rate": (
+                    hairpin_action_totals[group][name]
+                    / max(1.0, hairpin_condition_frames[group])
+                )
+                for group in HAIRPIN_ACTION_GROUPS
+                for name in RAM_ACTION_METRIC_NAMES
+            },
+        },
         sector_metrics={
             **_sector_metrics(sector_totals, episodes),
             **_lap_sector_metrics(lap_sector_frame_totals, lap_sector_samples),

@@ -120,6 +120,7 @@ def _evaluate_ram(
         frame_skip=frame_skip,
         max_episode_steps=evaluation_episode_steps(config),
         seed=int(config["seed"]) + 20_000,
+        reward_config=config.get("reward"),
     )
     model = PPO.load(model_path, device=device)
     validate_model_observation_space(model, model_path)

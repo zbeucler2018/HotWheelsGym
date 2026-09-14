@@ -73,6 +73,7 @@ def main() -> None:
         seed=int(config["seed"]),
         opponent_paths={slot: str(path) for slot, path in opponents.items()},
         state_path=str(states[0]) if states[0] else None,
+        reward_config=config.get("reward"),
     )
     try:
         observation, info = env.reset(seed=int(config["seed"]))

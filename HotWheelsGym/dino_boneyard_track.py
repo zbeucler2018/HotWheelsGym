@@ -387,6 +387,7 @@ class DinoTrackPose:
     """Track-relative geometry for one racer."""
 
     progress_index: int
+    segment_fraction: float
     center_x: float
     center_z: float
     tangent_x: float
@@ -410,11 +411,12 @@ def _unit(dx: float, dz: float) -> tuple[float, float]:
 
 def _segment_projection(
     x: float, z: float, start: tuple[int, int], end: tuple[int, int]
-) -> tuple[float, float, float, float, float]:
+) -> tuple[float, float, float, float, float, float]:
     dx = float(end[0] - start[0])
     dz = float(end[1] - start[1])
     length_squared = dx * dx + dz * dz
     if length_squared <= 1e-9:
+        fraction = 0.0
         projected_x = float(start[0])
         projected_z = float(start[1])
         tangent_x, tangent_z = 0.0, 1.0
@@ -430,7 +432,7 @@ def _segment_projection(
         projected_z = start[1] + fraction * dz
         tangent_x, tangent_z = _unit(dx, dz)
     distance_squared = (x - projected_x) ** 2 + (z - projected_z) ** 2
-    return distance_squared, projected_x, projected_z, tangent_x, tangent_z
+    return distance_squared, fraction, projected_x, projected_z, tangent_x, tangent_z
 
 
 def _track_tangent(index: int, radius: int = 2) -> tuple[float, float]:
@@ -460,19 +462,27 @@ def dino_track_pose(state: RacerState, search_radius: int = 4) -> DinoTrackPose:
     """Project a racer onto the local reference line and expose steering cues."""
 
     nominal = state.progress % DINO_TRACK_POINT_COUNT
-    best: tuple[float, int, float, float, float, float] | None = None
+    best: tuple[float, int, float, float, float, float, float] | None = None
     for offset in range(-search_radius, search_radius + 1):
         index = (nominal + offset) % DINO_TRACK_POINT_COUNT
         start = DINO_BONEYARD_CENTERLINE[index]
         end = DINO_BONEYARD_CENTERLINE[(index + 1) % DINO_TRACK_POINT_COUNT]
-        distance, center_x, center_z, tangent_x, tangent_z = _segment_projection(
-            state.x, state.z, start, end
+        distance, fraction, center_x, center_z, tangent_x, tangent_z = (
+            _segment_projection(state.x, state.z, start, end)
         )
-        candidate = (distance, index, center_x, center_z, tangent_x, tangent_z)
+        candidate = (
+            distance,
+            index,
+            fraction,
+            center_x,
+            center_z,
+            tangent_x,
+            tangent_z,
+        )
         if best is None or candidate[0] < best[0]:
             best = candidate
     assert best is not None
-    _, index, center_x, center_z, tangent_x, tangent_z = best
+    _, index, fraction, center_x, center_z, tangent_x, tangent_z = best
 
     angle = 2.0 * pi * (state.current_heading & (HEADING_PERIOD - 1)) / HEADING_PERIOD
     forward_x, forward_z = sin(angle), cos(angle)
@@ -516,6 +526,7 @@ def dino_track_pose(state: RacerState, search_radius: int = 4) -> DinoTrackPose:
         raise RuntimeError("Dino track feature name and value counts differ")
     return DinoTrackPose(
         progress_index=index,
+        segment_fraction=fraction,
         center_x=center_x,
         center_z=center_z,
         tangent_x=tangent_x,
@@ -525,3 +536,30 @@ def dino_track_pose(state: RacerState, search_radius: int = 4) -> DinoTrackPose:
         heading_error_cos=heading_error_cos,
         features=features,
     )
+
+
+def dino_continuous_progress_delta(
+    previous: DinoTrackPose,
+    current: DinoTrackPose,
+    *,
+    native_advance: int,
+    maximum_per_frame: float = 2.0,
+) -> float:
+    """Estimate signed sub-checkpoint progress while bounding projection jumps."""
+
+    previous_progress = previous.progress_index + previous.segment_fraction
+    current_progress = current.progress_index + current.segment_fraction
+    delta = current_progress - previous_progress
+    half_lap = DINO_TRACK_POINT_COUNT / 2
+    if delta > half_lap:
+        delta -= DINO_TRACK_POINT_COUNT
+    elif delta < -half_lap:
+        delta += DINO_TRACK_POINT_COUNT
+
+    # The native checkpoint transition disambiguates wrap direction. Projection
+    # remains useful within a checkpoint, where native_advance is normally zero.
+    if native_advance > 0 and delta < 0:
+        delta = float(native_advance)
+    elif native_advance < 0 and delta > 0:
+        delta = float(native_advance)
+    return max(-maximum_per_frame, min(maximum_per_frame, delta))

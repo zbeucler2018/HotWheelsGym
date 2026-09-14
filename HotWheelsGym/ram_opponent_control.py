@@ -13,6 +13,7 @@ from operator import index as integer_index
 from typing import Mapping
 
 from .dino_boneyard_track import (
+    DinoTrackPose,
     DINO_TRACK_OBSERVATION_NAMES,
     DINO_TRACK_OBSERVATION_SIZE,
     DINO_TRACK_POINT_COUNT,
@@ -42,6 +43,15 @@ DINO_POSITION_SCALE = 1 << 24
 RELATIVE_POSITION_SCALE = 1 << 23
 SPEED_DELTA_SCALE = 1 << 13
 RAM_SPEED_SCALE = 0x12000
+
+RAM_ACTION_METRIC_NAMES_BY_COMPONENT = (
+    ("drive_coast", "drive_accel", "drive_brake", "drive_accel_up"),
+    ("steer_straight", "steer_left", "steer_right"),
+    ("boost_off", "boost_on"),
+)
+RAM_ACTION_METRIC_NAMES = tuple(
+    name for names in RAM_ACTION_METRIC_NAMES_BY_COMPONENT for name in names
+)
 
 GBA_BUTTON_BITS = {
     "A": 0x001,
@@ -87,6 +97,68 @@ class BoostTelemetry:
     active: bool
 
 
+@dataclass(frozen=True)
+class RaceRewardConfig:
+    """Configurable objective while retaining legacy-checkpoint reproducibility."""
+
+    mode: str = "legacy"
+    progress_scale: float = 1.0
+    frame_cost: float = 0.02
+    wall_penalty: float = 0.1
+    wrong_way_penalty: float = 0.02
+    respawn_penalty: float = 10.0
+    rank_gain: float = 0.25
+    lap_bonus: float = 5.0
+    finish_bonus: float = 50.0
+
+    @classmethod
+    def from_mapping(cls, raw: Mapping[str, object] | None) -> "RaceRewardConfig":
+        if raw is None:
+            return cls()
+        unknown = set(raw) - set(cls.__dataclass_fields__)
+        if unknown:
+            raise ValueError("unknown RAM reward fields: " + ", ".join(sorted(unknown)))
+        config = cls(
+            mode=str(raw.get("mode", "legacy")),
+            progress_scale=float(raw.get("progress_scale", 1.0)),
+            frame_cost=float(raw.get("frame_cost", 0.02)),
+            wall_penalty=float(raw.get("wall_penalty", 0.1)),
+            wrong_way_penalty=float(raw.get("wrong_way_penalty", 0.02)),
+            respawn_penalty=float(raw.get("respawn_penalty", 10.0)),
+            rank_gain=float(raw.get("rank_gain", 0.25)),
+            lap_bonus=float(raw.get("lap_bonus", 5.0)),
+            finish_bonus=float(raw.get("finish_bonus", 50.0)),
+        )
+        if config.mode not in {"legacy", "time_trial"}:
+            raise ValueError("RAM reward mode must be 'legacy' or 'time_trial'")
+        nonnegative = (
+            "progress_scale",
+            "frame_cost",
+            "wall_penalty",
+            "wrong_way_penalty",
+            "respawn_penalty",
+            "rank_gain",
+            "lap_bonus",
+            "finish_bonus",
+        )
+        if any(getattr(config, name) < 0 for name in nonnegative):
+            raise ValueError("RAM reward weights must be nonnegative")
+        return config
+
+
+def _empty_action_counts() -> dict[str, int]:
+    return dict.fromkeys(RAM_ACTION_METRIC_NAMES, 0)
+
+
+def _empty_sector_action_counts() -> dict[str, list[int]]:
+    return {name: [0] * DINO_SECTOR_COUNT for name in RAM_ACTION_METRIC_NAMES}
+
+
+def _record_action(counts: dict[str, int], action: tuple[int, int, int]) -> None:
+    for names, selected in zip(RAM_ACTION_METRIC_NAMES_BY_COMPONENT, action):
+        counts[names[selected]] += 1
+
+
 @dataclass
 class DinoHairpinTelemetry:
     """Accumulate raw-frame diagnostics for Dino Boneyard's first hairpin."""
@@ -102,7 +174,17 @@ class DinoHairpinTelemetry:
     minimum_speed_total: int = 0
     wall_frames: int = 0
     skid_frames: int = 0
+    condition_jet_boost_frames: int = 0
+    condition_no_jet_boost_frames: int = 0
+    action_frames: dict[str, int] = field(default_factory=_empty_action_counts)
+    jet_boost_action_frames: dict[str, int] = field(
+        default_factory=_empty_action_counts
+    )
+    no_jet_boost_action_frames: dict[str, int] = field(
+        default_factory=_empty_action_counts
+    )
     active: bool = False
+    _active_with_jet_boost: bool = False
     _active_frames: int = 0
     _active_minimum_speed: int | None = None
 
@@ -118,6 +200,7 @@ class DinoHairpinTelemetry:
         *,
         advance: int,
         hit_wall: bool,
+        action: tuple[int, int, int] = (0, 0, 0),
     ) -> None:
         """Record one emulator-frame transition without affecting game state."""
 
@@ -126,7 +209,8 @@ class DinoHairpinTelemetry:
         if not self.active and is_inside and not was_inside and advance > 0:
             self.active = True
             self.entries += 1
-            self.entries_with_jet_boost += int(current.jet_boost_remaining > 0)
+            self._active_with_jet_boost = current.jet_boost_remaining > 0
+            self.entries_with_jet_boost += int(self._active_with_jet_boost)
             self.entry_speed_total += current.speed
             self._active_frames = 0
             self._active_minimum_speed = None
@@ -136,6 +220,13 @@ class DinoHairpinTelemetry:
             self.speed_total += current.speed
             self.wall_frames += int(hit_wall)
             self.skid_frames += int(current.skid_active)
+            _record_action(self.action_frames, action)
+            if self._active_with_jet_boost:
+                self.condition_jet_boost_frames += 1
+                _record_action(self.jet_boost_action_frames, action)
+            else:
+                self.condition_no_jet_boost_frames += 1
+                _record_action(self.no_jet_boost_action_frames, action)
             self._active_frames += 1
             if self._active_minimum_speed is None:
                 self._active_minimum_speed = current.speed
@@ -152,6 +243,7 @@ class DinoHairpinTelemetry:
                 self.exit_speed_total += current.speed
                 self.minimum_speed_total += self._active_minimum_speed or 0
             self.active = False
+            self._active_with_jet_boost = False
             self._active_frames = 0
             self._active_minimum_speed = None
 
@@ -190,6 +282,9 @@ class DinoSectorTelemetry:
     jet_boost_pickups: list[int] = field(
         default_factory=lambda: [0] * DINO_SECTOR_COUNT
     )
+    action_frames: dict[str, list[int]] = field(
+        default_factory=_empty_sector_action_counts
+    )
     lap_completed_frames: dict[tuple[int, int], int] = field(default_factory=dict)
     active_sector: int | None = None
     _active_lap: int = 1
@@ -221,6 +316,7 @@ class DinoSectorTelemetry:
         hit_wall: bool,
         boost_active: bool,
         jet_boost_acquired: bool,
+        action: tuple[int, int, int] = (0, 0, 0),
         current_lap: int = 1,
     ) -> None:
         """Record one emulator frame without affecting the policy or game state."""
@@ -251,6 +347,8 @@ class DinoSectorTelemetry:
         self.boost_frames[sector] += int(boost_active)
         self.jet_boost_frames[sector] += int(current.jet_boost_remaining > 0)
         self.jet_boost_pickups[sector] += int(jet_boost_acquired)
+        for names, selected in zip(RAM_ACTION_METRIC_NAMES_BY_COMPONENT, action):
+            self.action_frames[names[selected]][sector] += 1
         self._active_frames += 1
         if self._active_minimum_speed is None:
             self._active_minimum_speed = current.speed
@@ -571,6 +669,7 @@ def build_dino_ram_observation(
     previous_action: object,
     *,
     total_laps: int = 3,
+    track_pose: DinoTrackPose | None = None,
 ) -> tuple[float, ...]:
     """Build the same Dino racer-centric observation for any racer slot."""
 
@@ -593,7 +692,7 @@ def build_dino_ram_observation(
     )
     rank_value = _clip((progress.rank(controlled_slot, states) - 1) / 3.0, 0.0, 1.0)
     advance = progress_delta(previous.progress, state.progress, progress.progress_count)
-    track = dino_track_pose(state)
+    track = track_pose or dino_track_pose(state)
 
     features: list[float] = [
         *heading,
@@ -686,4 +785,34 @@ def race_reward(
         + 0.25 * (previous_rank - current_rank)
         + 5.0 * completed_laps
         + (50.0 if finished_now else 0.0)
+    )
+
+
+def time_trial_race_reward(
+    continuous_advance: float,
+    *,
+    previous_rank: int,
+    current_rank: int,
+    completed_laps: int = 0,
+    finished_now: bool = False,
+    hit_wall: bool = False,
+    heading_alignment: float = 1.0,
+    respawned_now: bool = False,
+    config: RaceRewardConfig | None = None,
+) -> float:
+    """Reward useful forward progress while making elapsed frames expensive."""
+
+    weights = config or RaceRewardConfig(mode="time_trial")
+    if weights.mode != "time_trial":
+        raise ValueError("time_trial_race_reward requires time_trial mode")
+    wrong_way = max(0.0, -_clip(heading_alignment))
+    return float(
+        weights.progress_scale * continuous_advance
+        - weights.frame_cost
+        - (weights.wall_penalty if hit_wall else 0.0)
+        - weights.wrong_way_penalty * wrong_way
+        - (weights.respawn_penalty if respawned_now else 0.0)
+        + weights.rank_gain * (previous_rank - current_rank)
+        + weights.lap_bonus * completed_laps
+        + (weights.finish_bonus if finished_now else 0.0)
     )

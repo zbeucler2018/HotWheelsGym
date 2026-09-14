@@ -1,3 +1,4 @@
+import gzip
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -6,8 +7,12 @@ import gymnasium as gym
 import numpy as np
 
 from HotWheelsGym.RAMOpponent import _is_white_respawn_frame
-from training_scripts.ram_player.callbacks import evaluate_ram_policy
+from training_scripts.ram_player.callbacks import (
+    evaluate_ram_policy,
+    evaluation_metric_names,
+)
 from training_scripts.ram_player.common import (
+    InitialStatePool,
     load_config,
     require_all_opponent_slots,
     validate_model_action_space,
@@ -18,6 +23,35 @@ from training_scripts.ram_player.sweep import checkpoint_sort_key
 
 
 class RAMEvaluationToolTests(unittest.TestCase):
+    def test_evaluation_metric_names_survive_console_truncation(self):
+        names = evaluation_metric_names()
+        truncated = [("   " + name)[:36] for name in names]
+        self.assertEqual(len(truncated), len(set(truncated)))
+
+    def test_initial_state_pool_loads_selected_gzip_state(self):
+        class FakeStateEnv(gym.Env):
+            observation_space = gym.spaces.Box(-1.0, 1.0, (1,), np.float32)
+            action_space = gym.spaces.Discrete(1)
+
+            def __init__(self):
+                self.initial_state = b"default"
+                self.statename = "default.state"
+
+            def reset(self, *, seed=None, options=None):
+                return np.zeros(1, dtype=np.float32), {}
+
+        with TemporaryDirectory() as temporary:
+            state_path = Path(temporary) / "alternate.state"
+            with gzip.open(state_path, "wb") as handle:
+                handle.write(b"alternate")
+            base = FakeStateEnv()
+            env = InitialStatePool(base, [str(state_path)], seed=7)
+            _, info = env.reset(seed=7)
+
+            self.assertEqual(base.initial_state, b"alternate")
+            self.assertEqual(base.statename, str(state_path))
+            self.assertEqual(info["ram_initial_state"], str(state_path))
+
     def test_ablation_configs_use_equal_raw_frame_budgets(self):
         root = Path(__file__).resolve().parents[1] / "training_scripts" / "ram_player"
         slow = load_config(root / "ablation_15hz.yml")
@@ -78,6 +112,11 @@ class RAMEvaluationToolTests(unittest.TestCase):
                         "ram_player_hairpin_exit_speed_total": 135_000,
                         "ram_player_hairpin_wall_frames": 12,
                         "ram_player_hairpin_skid_frames": 30,
+                        "ram_player_hairpin_condition_jet_boost_frames": 80,
+                        "ram_player_hairpin_condition_no_jet_boost_frames": 40,
+                        "ram_player_hairpin_action_drive_brake_frames": 30,
+                        "ram_player_hairpin_jet_boost_action_drive_brake_frames": 10,
+                        "ram_player_hairpin_no_jet_boost_action_drive_brake_frames": 20,
                         "ram_player_lap_1_frames": 4800,
                         "ram_player_lap_2_frames": 4500,
                         "ram_player_lap_3_frames": 4200,
@@ -93,6 +132,7 @@ class RAMEvaluationToolTests(unittest.TestCase):
                         "ram_player_sector_02_boost_frames": 60,
                         "ram_player_sector_02_jet_boost_frames": 90,
                         "ram_player_sector_02_jet_boost_pickups": 2,
+                        "ram_player_sector_02_action_drive_brake_frames": 30,
                         "ram_player_lap_1_sector_02_frames": 42,
                         "ram_player_lap_2_sector_02_frames": 39,
                         "ram_player_lap_3_sector_02_frames": 36,
@@ -126,6 +166,16 @@ class RAMEvaluationToolTests(unittest.TestCase):
         self.assertEqual(result.hairpin_wall_contact_rate, 0.1)
         self.assertEqual(result.hairpin_skid_active_rate, 0.25)
         self.assertAlmostEqual(result.hairpin_jet_boost_entry_rate, 2 / 3)
+        self.assertEqual(result.action_metrics["race_drive_brake_rate"], 0.25)
+        self.assertEqual(result.action_metrics["hairpin_all_drive_brake_rate"], 0.25)
+        self.assertEqual(
+            result.action_metrics["hairpin_jet_drive_brake_rate"],
+            0.125,
+        )
+        self.assertEqual(
+            result.action_metrics["hairpin_nojet_drive_brake_rate"],
+            0.5,
+        )
         self.assertEqual(result.mean_lap_1_seconds, 80.0)
         self.assertEqual(result.mean_lap_2_seconds, 75.0)
         self.assertEqual(result.mean_lap_3_seconds, 70.0)
@@ -136,6 +186,9 @@ class RAMEvaluationToolTests(unittest.TestCase):
         self.assertEqual(result.sector_metrics["sector_02_wall_contact_rate"], 0.1)
         self.assertEqual(result.sector_metrics["sector_02_skid_active_rate"], 0.25)
         self.assertEqual(result.sector_metrics["sector_02_boost_active_rate"], 0.5)
+        self.assertEqual(
+            result.sector_metrics["sector_02_action_drive_brake_rate"], 0.25
+        )
         self.assertEqual(result.sector_metrics["sector_02_jet_boost_active_rate"], 0.75)
         self.assertAlmostEqual(
             result.sector_metrics["sector_02_jet_boost_pickup_rate"], 2 / 3

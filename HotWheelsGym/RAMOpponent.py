@@ -9,7 +9,11 @@ from typing import Any, Protocol
 import gymnasium as gym
 import numpy as np
 
-from .dino_boneyard_track import dino_track_pose
+from .dino_boneyard_track import (
+    DinoTrackPose,
+    dino_continuous_progress_delta,
+    dino_track_pose,
+)
 from .enums import RaceMode, Tracks
 from .npc_control import (
     MAX_BOOST_CHARGE,
@@ -26,7 +30,9 @@ from .ram_opponent_control import (
     DinoSectorTelemetry,
     LapSplitTracker,
     RAM_ACTION_COMPONENT_SIZES,
+    RAM_ACTION_METRIC_NAMES,
     RAM_DEFAULT_ACTION,
+    RaceRewardConfig,
     RaceProgressTracker,
     RacerButtonState,
     build_dino_ram_observation,
@@ -36,6 +42,7 @@ from .ram_opponent_control import (
     race_reward,
     read_racer_states,
     write_racer_buttons,
+    time_trial_race_reward,
 )
 
 
@@ -133,7 +140,7 @@ def _lap_split_info(prefix: str, timing: LapSplitTracker) -> dict[str, int]:
 
 
 def _hairpin_info(telemetry: DinoHairpinTelemetry) -> dict[str, Any]:
-    return {
+    info = {
         "ram_player_hairpin_entries": telemetry.entries,
         "ram_player_hairpin_completed": telemetry.completed,
         "ram_player_hairpin_jet_boost_entries": telemetry.entries_with_jet_boost,
@@ -145,8 +152,23 @@ def _hairpin_info(telemetry: DinoHairpinTelemetry) -> dict[str, Any]:
         "ram_player_hairpin_minimum_speed_total": telemetry.minimum_speed_total,
         "ram_player_hairpin_wall_frames": telemetry.wall_frames,
         "ram_player_hairpin_skid_frames": telemetry.skid_frames,
+        "ram_player_hairpin_condition_jet_boost_frames": (
+            telemetry.condition_jet_boost_frames
+        ),
+        "ram_player_hairpin_condition_no_jet_boost_frames": (
+            telemetry.condition_no_jet_boost_frames
+        ),
         "ram_player_hairpin_active": telemetry.active,
     }
+    for name in RAM_ACTION_METRIC_NAMES:
+        info[f"ram_player_hairpin_action_{name}_frames"] = telemetry.action_frames[name]
+        info[f"ram_player_hairpin_jet_boost_action_{name}_frames"] = (
+            telemetry.jet_boost_action_frames[name]
+        )
+        info[f"ram_player_hairpin_no_jet_boost_action_{name}_frames"] = (
+            telemetry.no_jet_boost_action_frames[name]
+        )
+    return info
 
 
 def _sector_info(telemetry: DinoSectorTelemetry) -> dict[str, Any]:
@@ -170,6 +192,10 @@ def _sector_info(telemetry: DinoSectorTelemetry) -> dict[str, Any]:
             info[f"ram_player_sector_{sector:02d}_{name}"] = getattr(telemetry, name)[
                 sector
             ]
+        for name in RAM_ACTION_METRIC_NAMES:
+            info[f"ram_player_sector_{sector:02d}_action_{name}_frames"] = (
+                telemetry.action_frames[name][sector]
+            )
     info["ram_player_active_sector"] = telemetry.active_sector
     for (lap, sector), frames in telemetry.lap_completed_frames.items():
         info[f"ram_player_lap_{lap}_sector_{sector:02d}_frames"] = frames
@@ -179,7 +205,12 @@ def _sector_info(telemetry: DinoSectorTelemetry) -> dict[str, Any]:
 class DinoRAMPlayerEnv(gym.Wrapper):
     """Train Player 1 from racer-centric RAM instead of framebuffer pixels."""
 
-    def __init__(self, env: gym.Env) -> None:
+    def __init__(
+        self,
+        env: gym.Env,
+        *,
+        reward_config: Mapping[str, object] | None = None,
+    ) -> None:
         _validate_dino_multi(env)
         super().__init__(env)
         self._race: RaceMemory | None = None
@@ -195,6 +226,8 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         self._jet_boost_pickups = 0
         self._hairpin = DinoHairpinTelemetry()
         self._sectors: DinoSectorTelemetry | None = None
+        self._track_pose: DinoTrackPose | None = None
+        self._reward_config = RaceRewardConfig.from_mapping(reward_config)
         self.action_space = gym.spaces.MultiDiscrete(
             np.asarray(RAM_ACTION_COMPONENT_SIZES, dtype=np.int64)
         )
@@ -222,6 +255,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
                 0,
                 self._previous_action,
                 total_laps=int(_bare_env(self.env).total_laps),
+                track_pose=self._track_pose,
             ),
             dtype=np.float32,
         )
@@ -248,6 +282,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         self._sectors = DinoSectorTelemetry.start(
             self._states[0], self.progress_tracker.current_lap(0, self._states[0])
         )
+        self._track_pose = dino_track_pose(self._states[0])
         info.update(
             _state_info(
                 "ram_player_",
@@ -262,7 +297,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         info.update(_lap_split_info("ram_player_", self._lap_timing))
         info.update(_hairpin_info(self._hairpin))
         info.update(_sector_info(self._sectors))
-        track = dino_track_pose(self._states[0])
+        track = self._track_pose
         info["ram_player_track_index"] = track.progress_index
         info["ram_player_lateral_offset"] = track.lateral_offset
         info["ram_player_heading_alignment"] = track.heading_error_cos
@@ -277,11 +312,12 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         return self._observation(), info
 
     def step(self, action: Any) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
-        if self._race is None or self._states is None:
+        if self._race is None or self._states is None or self._track_pose is None:
             raise RuntimeError("call reset() before step()")
         action_components = normalize_racer_action(np.asarray(action).reshape(-1))
         previous_states = self._states
         previous = previous_states[0]
+        previous_track = self._track_pose
         previous_rank = self.progress_tracker.rank(0, previous_states)
         previous_lap = self.progress_tracker.current_lap(0, previous)
         native_action = player_buttons_from_action(
@@ -314,6 +350,11 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         )
         info.update(_lap_split_info("ram_player_", self._lap_timing))
         track = dino_track_pose(current)
+        continuous_advance = dino_continuous_progress_delta(
+            previous_track,
+            track,
+            native_advance=advance,
+        )
         player_respawn_pending = self._race.respawn_pending(0)
         respawned_now = player_respawn_pending and not self._player_respawn_pending
         hit_wall = bool(info.get("hit_wall", False))
@@ -325,6 +366,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
             current,
             advance=advance,
             hit_wall=hit_wall,
+            action=action_components,
         )
         if self._sectors is None:
             raise RuntimeError("call reset() before tracking sectors")
@@ -335,22 +377,34 @@ class DinoRAMPlayerEnv(gym.Wrapper):
             hit_wall=hit_wall,
             boost_active=boost.active,
             jet_boost_acquired=jet_boost_acquired,
+            action=action_components,
             current_lap=current_lap,
         )
-        reward = race_reward(
-            advance,
-            current.speed,
-            previous_rank=previous_rank,
-            current_rank=current_rank,
-            completed_laps=max(0, current_lap - previous_lap),
-            finished_now=finished_now,
-            hit_wall=hit_wall,
-            lateral_offset=track.lateral_offset,
-            heading_alignment=track.heading_error_cos,
-            respawned_now=respawned_now,
-        )
+        reward_arguments = {
+            "previous_rank": previous_rank,
+            "current_rank": current_rank,
+            "completed_laps": max(0, current_lap - previous_lap),
+            "finished_now": finished_now,
+            "hit_wall": hit_wall,
+            "heading_alignment": track.heading_error_cos,
+            "respawned_now": respawned_now,
+        }
+        if self._reward_config.mode == "time_trial":
+            reward = time_trial_race_reward(
+                continuous_advance,
+                config=self._reward_config,
+                **reward_arguments,
+            )
+        else:
+            reward = race_reward(
+                advance,
+                current.speed,
+                lateral_offset=track.lateral_offset,
+                **reward_arguments,
+            )
         self._previous_states = previous_states
         self._states = current_states
+        self._track_pose = track
         self._previous_action = action_components
         self._player_respawn_pending = player_respawn_pending
         info.update(
@@ -365,6 +419,9 @@ class DinoRAMPlayerEnv(gym.Wrapper):
             )
         )
         info["ram_player_progress_delta"] = advance
+        info["ram_player_continuous_progress_delta"] = continuous_advance
+        info["ram_player_reward_mode"] = self._reward_config.mode
+        info["ram_player_action"] = action_components
         info["ram_player_frame_reward"] = reward
         info["ram_player_raw_frame"] = self._raw_frame
         info["ram_player_track_index"] = track.progress_index

@@ -287,9 +287,9 @@ model from scratch; subsequent v6 checkpoints can be used symmetrically for
 self-play. Other tracks' power-up types still need a portability audit before
 their effects are added to this Dino-specific contract.
 
-The reward remains progress-dominant and finish-aware. Small shaping penalties
-now discourage wall contact, large centerline error, wrong-way alignment, and a
-new Player 1 respawn. Evaluation logs mean lateral error, heading alignment,
+The legacy v6 reward remains progress-dominant and finish-aware. Small shaping
+penalties discourage wall contact, large centerline error, wrong-way alignment,
+and a Player 1 respawn. Evaluation logs mean lateral error, heading alignment,
 wall-contact rate, native skid-frame rate, and respawns alongside finish time,
 completion, and rank.
 
@@ -305,6 +305,53 @@ The game's boost chord itself is **L+R**. Because boost is independent, the
 policy can use pure L+R, keep A held with A+L+R, and steer left or right during
 either form. All 24 combinations pass through the same native Player 1 button
 path for Player 1 and converted opponents.
+
+### Time-trial v7 objective and curriculum
+
+`dino_boneyard_time_trial_v7.yml` keeps the v6 62-value observation and full
+`MultiDiscrete(4, 3, 2)` action contract, so v6 factorized checkpoints can be
+fine-tuned directly. Braking and coasting remain available for hairpin attempts
+where the policy misses Jet Boost.
+
+The v7 reward changes only the training objective:
+
+- sub-checkpoint progress comes from the racer's continuous projection onto the
+  Dino reference line;
+- every raw emulator frame has an explicit configurable cost;
+- wall contact, wrong-way heading, and respawns remain penalties;
+- the old raw-speed bonus and absolute-centerline penalty are absent, allowing
+  the policy to use the track width and optimize an actual racing line;
+- boost buttons and pickups are not rewarded directly. They matter only when
+  they improve forward progress and elapsed time.
+
+The v7 config enables deterministic per-worker sampling from the full training
+state pool. It includes the actual starting grid plus weighted private states
+just before the hairpin with and without native Jet Boost. Generate those two
+ignored states from a RAM checkpoint known to both acquire and miss the pickup;
+the utility accepts the legacy v5 seven-action model as well as v6 models:
+
+```bash
+uv run --no-sync python -m training_scripts.ram_player.create_hairpin_states \
+  --rom rom.gba \
+  --player-model training_scripts/ram_runs/PRIOR_RUN/fastest_model.zip \
+  --output-dir training_scripts/ram_runs/private \
+  --config training_scripts/ram_player/dino_boneyard_time_trial_v7.yml
+```
+
+The generated savestates and imported ROM stay under the ignored `ram_runs`
+tree. Never commit them. Start a bounded v7 fine-tune with:
+
+```bash
+uv run --no-sync python -m training_scripts.ram_player.train \
+  --rom rom.gba \
+  --config training_scripts/ram_player/dino_boneyard_time_trial_v7.yml \
+  --resume-model training_scripts/ram_runs/PRIOR_V6/evaluation/best_model.zip
+```
+
+Evaluation logs raw-frame action rates for every drive, steering, and boost
+choice globally, by track sector, and through the hairpin separately for
+Jet-Boost and no-Jet-Boost entries. These metrics are written to TensorBoard,
+evaluation CSV files, and recorded-race JSON sidecars.
 
 The native-button ROM makes all four race slots genuine player-class racers.
 Player 1 continues sampling the hardware keypad; slots 1–3 instead retain the

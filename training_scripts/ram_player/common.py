@@ -6,11 +6,12 @@ import gzip
 import json
 import os
 import platform
+import random
 import subprocess
 import sys
 from hashlib import sha1
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import gymnasium as gym
 import yaml
@@ -107,6 +108,8 @@ def load_config(path: Path) -> dict[str, Any]:
         raise ValueError("ppo configuration must be a mapping")
     if not isinstance(config["opponents"], dict):
         raise ValueError("opponents must map racer slots to RAM model paths")
+    if "reward" in config and not isinstance(config["reward"], dict):
+        raise ValueError("reward configuration must be a mapping")
     return config
 
 
@@ -291,6 +294,46 @@ def opponent_state_path(config: Mapping[str, Any]) -> Path:
     return state
 
 
+class InitialStatePool(gym.Wrapper):
+    """Choose a deterministic per-worker sequence of training states on reset."""
+
+    def __init__(
+        self,
+        env: gym.Env,
+        state_paths: Sequence[str | None],
+        *,
+        seed: int,
+    ) -> None:
+        super().__init__(env)
+        if not state_paths:
+            raise ValueError("initial state pool must not be empty")
+        base = env.unwrapped
+        default_state = bytes(base.initial_state)
+        default_name = str(base.statename)
+        self._states: list[tuple[bytes, str]] = []
+        for raw_path in state_paths:
+            if raw_path is None:
+                self._states.append((default_state, default_name))
+                continue
+            path = Path(raw_path).expanduser().resolve()
+            if not path.is_file():
+                raise FileNotFoundError(path)
+            with gzip.open(path, "rb") as handle:
+                self._states.append((handle.read(), str(path)))
+        self._random = random.Random(seed)
+
+    def reset(self, **kwargs: Any) -> tuple[Any, dict[str, Any]]:
+        if kwargs.get("seed") is not None:
+            self._random.seed(int(kwargs["seed"]))
+        state, name = self._random.choice(self._states)
+        base = self.env.unwrapped
+        base.initial_state = state
+        base.statename = name
+        observation, info = self.env.reset(**kwargs)
+        info["ram_initial_state"] = name
+        return observation, info
+
+
 def make_ram_env(
     *,
     frame_skip: int,
@@ -298,9 +341,13 @@ def make_ram_env(
     seed: int,
     opponent_paths: Mapping[int, str] | None = None,
     state_path: str | None = None,
+    state_paths: Sequence[str | None] | None = None,
     monitor_path: str | None = None,
+    reward_config: Mapping[str, object] | None = None,
 ) -> gym.Env:
     base = HotWheelsGym.make(ENV_ID, render_mode="rgb_array")
+    if state_path and state_paths:
+        raise ValueError("provide state_path or state_paths, not both")
     if state_path:
         state = Path(state_path).expanduser().resolve()
         if not state.is_file():
@@ -309,6 +356,8 @@ def make_ram_env(
             base.unwrapped.initial_state = handle.read()
         base.unwrapped.statename = str(state)
     env: gym.Env = base
+    if state_paths:
+        env = InitialStatePool(env, state_paths, seed=seed)
     if opponent_paths:
         models = {}
         for slot, path in opponent_paths.items():
@@ -321,7 +370,7 @@ def make_ram_env(
             models,
             action_repeat=frame_skip,
         )
-    env = DinoRAMPlayerEnv(env)
+    env = DinoRAMPlayerEnv(env, reward_config=reward_config)
     env = RAMActionRepeat(env, repeat=frame_skip)
     env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_steps)
     if monitor_path:

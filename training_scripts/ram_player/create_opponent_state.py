@@ -58,6 +58,7 @@ def main() -> None:
         frame_skip=frame_skip,
         max_episode_steps=evaluation_episode_steps(config),
         seed=int(config["seed"]) + 40_000,
+        reward_config=config.get("reward"),
     )
     try:
         observation, info = env.reset(seed=int(config["seed"]) + 40_000)

@@ -126,6 +126,8 @@ def main() -> None:
         opponents,
     )
     opponent_paths = {slot: str(path) for slot, path in opponents.items()}
+    training_state_values = [str(state) if state else None for state in states]
+    sample_training_states = bool(config.get("sample_training_states", False))
 
     env_functions = []
     for index in range(int(config["num_envs"])):
@@ -137,8 +139,20 @@ def main() -> None:
                 max_episode_steps=int(config["max_episode_steps"]),
                 seed=int(config["seed"]) + index,
                 opponent_paths=opponent_paths,
-                state_path=str(state) if state else None,
+                state_path=(
+                    str(states[0])
+                    if opponents
+                    else (
+                        None if sample_training_states or state is None else str(state)
+                    )
+                ),
+                state_paths=(
+                    training_state_values
+                    if sample_training_states and not opponents
+                    else None
+                ),
                 monitor_path=str(run_dir / "monitor" / f"worker_{index}"),
+                reward_config=config.get("reward"),
             )
         )
 
@@ -161,6 +175,7 @@ def main() -> None:
             seed=int(config["seed"]) + 10_000,
             opponent_paths=opponent_paths,
             state_path=str(states[0]) if opponents else None,
+            reward_config=config.get("reward"),
         )
         try:
             if args.resume_model:
