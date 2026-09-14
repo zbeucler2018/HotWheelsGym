@@ -7,15 +7,12 @@ import gzip
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 from stable_baselines3 import PPO
 
-from HotWheelsGym.dino_boneyard_track import DINO_TRACK_OBSERVATION_SIZE
 from HotWheelsGym.ram_opponent_control import (
     DINO_BONEYARD_PROGRESS_COUNT,
     DINO_HAIRPIN_START_PROGRESS,
     DINO_RAM_OBSERVATION_SIZE,
-    RAM_ACTION_COMPONENT_SIZES,
 )
 
 from .common import (
@@ -27,20 +24,12 @@ from .common import (
     validate_model_action_space,
     validate_model_observation_space,
 )
-
-LEGACY_V5_OBSERVATION_SIZE = 60
-LEGACY_V5_ACTION_SIZE = 7
-LEGACY_V5_ACTIONS = (
-    (0, 0, 0),  # coast
-    (1, 0, 0),  # accelerate
-    (1, 1, 0),  # accelerate left
-    (1, 2, 0),  # accelerate right
-    (2, 0, 0),  # brake
-    (3, 0, 0),  # accelerate + up
-    (1, 0, 1),  # accelerate + L+R boost
+from .legacy_policy import (
+    LEGACY_V5_ACTIONS,
+    LEGACY_V5_OBSERVATION_SIZE,
+    LegacyV5PolicyAdapter,
+    is_legacy_v5_policy,
 )
-V6_ACTION_HISTORY_START = 15 + DINO_TRACK_OBSERVATION_SIZE
-V6_OTHER_RACERS_START = V6_ACTION_HISTORY_START + sum(RAM_ACTION_COMPONENT_SIZES)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -60,27 +49,13 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _legacy_v5_observation(observation: np.ndarray, previous_action: int) -> np.ndarray:
-    action_history = np.zeros(LEGACY_V5_ACTION_SIZE, dtype=np.float32)
-    action_history[previous_action] = 1.0
-    return np.concatenate(
-        (
-            observation[:V6_ACTION_HISTORY_START],
-            action_history,
-            observation[V6_OTHER_RACERS_START:],
-        )
-    ).astype(np.float32, copy=False)
-
-
 def _model_kind(model: Any, path: Path) -> str:
     shape = tuple(getattr(model.observation_space, "shape", ()) or ())
     if shape == (DINO_RAM_OBSERVATION_SIZE,):
         validate_model_observation_space(model, path)
         validate_model_action_space(model, path)
         return "v6"
-    if shape == (LEGACY_V5_OBSERVATION_SIZE,) and getattr(
-        model.action_space, "n", None
-    ) == len(LEGACY_V5_ACTIONS):
+    if is_legacy_v5_policy(model):
         return "v5"
     raise ValueError(
         f"hairpin state capture requires a v5 or v6 RAM model, got "
@@ -114,6 +89,7 @@ def main() -> None:
     config = load_config(args.config.expanduser().resolve())
     model = PPO.load(model_path, device=args.device)
     model_kind = _model_kind(model, model_path)
+    policy = LegacyV5PolicyAdapter(model) if model_kind == "v5" else model
     env = make_ram_env(
         frame_skip=int(config["frame_skip"]),
         max_episode_steps=evaluation_episode_steps(config),
@@ -121,19 +97,10 @@ def main() -> None:
         reward_config=config.get("reward"),
     )
     captures: dict[str, tuple[bytes, int, int]] = {}
-    previous_legacy_action = 0
     try:
         observation, info = env.reset(seed=int(config["seed"]) + 50_000)
         for _ in range(evaluation_episode_steps(config)):
-            if model_kind == "v5":
-                legacy_observation = _legacy_v5_observation(
-                    observation, previous_legacy_action
-                )
-                legacy_action, _ = model.predict(legacy_observation, deterministic=True)
-                previous_legacy_action = int(np.asarray(legacy_action).item())
-                action = LEGACY_V5_ACTIONS[previous_legacy_action]
-            else:
-                action, _ = model.predict(observation, deterministic=True)
+            action, _ = policy.predict(observation, deterministic=True)
             observation, _, terminated, truncated, info = env.step(action)
             progress = int(info["ram_player_progress"]) % DINO_BONEYARD_PROGRESS_COUNT
             timer = int(info["ram_player_jet_boost_remaining"])

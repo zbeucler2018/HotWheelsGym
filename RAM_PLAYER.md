@@ -412,6 +412,27 @@ generated ROMs are ignored by Git and must never be committed.
 
 ## Self-play against prior Player 1 models
 
+Before training against a league, validate the matchup with no learning. The
+Phase 0 evaluator accepts current factorized policies plus legacy v5
+`Discrete(7)` policies, converts every action back to the shared native-button
+contract, and rotates each frozen opponent through all three starting slots:
+
+```bash
+uv run --no-sync python -m training_scripts.ram_player.phase0_league_eval \
+  --rom rom.gba \
+  --player-model training_scripts/ram_runs/CURRENT/evaluation/best_model.zip \
+  --opponent v5=training_scripts/ram_runs/V5/fastest_model.zip \
+  --opponent v6=training_scripts/ram_runs/V6/evaluation/best_model.zip \
+  --opponent v8=training_scripts/ram_runs/V8/evaluation/best_model.zip \
+  --state training_scripts/ram_runs/private/dino_four_players.state \
+  --config training_scripts/ram_player/dino_boneyard_pickup_v8.yml
+```
+
+This performs three deterministic races and no training. It records Player 1
+win rate, time, and pickup behavior plus every NPC's rank, completion, lap
+splits, and Jet Boost pickups. JSON, Markdown, TensorBoard scalars, and one MP4
+per slot rotation are written under the ignored `ram_runs` tree.
+
 Stable-Retro savestates restore racer objects after construction. Therefore an
 old checked-in multiplayer state still contains stock CPU objects even with the
 new ROM. First create one private Dino Boneyard start-line state under the

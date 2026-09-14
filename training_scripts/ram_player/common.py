@@ -30,6 +30,8 @@ from HotWheelsGym.ram_opponent_control import (
     RAM_OBSERVATION_NAMES,
 )
 
+from .legacy_policy import LegacyV5PolicyAdapter, is_legacy_v5_policy
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = Path(__file__).with_name("dino_boneyard.yml")
 DEFAULT_RUN_ROOT = REPO_ROOT / "training_scripts" / "ram_runs"
@@ -362,9 +364,12 @@ def make_ram_env(
         models = {}
         for slot, path in opponent_paths.items():
             model = PPO.load(path, device="cpu")
-            validate_model_observation_space(model, path)
-            validate_model_action_space(model, path)
-            models[int(slot)] = model
+            if is_legacy_v5_policy(model):
+                models[int(slot)] = LegacyV5PolicyAdapter(model)
+            else:
+                validate_model_observation_space(model, path)
+                validate_model_action_space(model, path)
+                models[int(slot)] = model
         env = DinoRAMModelOpponentEnv(
             env,
             models,

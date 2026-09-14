@@ -605,6 +605,9 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
             for slot in slots
         }
         for slot in slots:
+            reset_policy = getattr(self.opponents[slot], "reset", None)
+            if callable(reset_policy):
+                reset_policy()
             info.update(
                 _state_info(
                     f"ram_npc_{slot}_",

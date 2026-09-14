@@ -20,11 +20,61 @@ from training_scripts.ram_player.common import (
     validate_model_observation_space,
 )
 from training_scripts.ram_player.media import RGBVideoWriter
+from training_scripts.ram_player.legacy_policy import (
+    LEGACY_V5_ACTION_SIZE,
+    V6_ACTION_HISTORY_START,
+    LegacyV5PolicyAdapter,
+)
+from training_scripts.ram_player.phase0_league_eval import _rotations
 from training_scripts.ram_player.sweep import checkpoint_sort_key
 from training_scripts.ram_player.train import _verify_resume_ppo_configuration
 
 
 class RAMEvaluationToolTests(unittest.TestCase):
+    def test_legacy_v5_policy_adapter_translates_observation_and_action(self):
+        class FakeLegacyModel:
+            observation_space = gym.spaces.Box(-1.0, 1.0, (60,), np.float32)
+            action_space = gym.spaces.Discrete(7)
+
+            def __init__(self):
+                self.observations = []
+
+            def predict(self, observation, *, deterministic=True):
+                self.observations.append(np.array(observation, copy=True))
+                return np.asarray(6), None
+
+        model = FakeLegacyModel()
+        policy = LegacyV5PolicyAdapter(model)
+        observation = np.linspace(-1.0, 1.0, 62, dtype=np.float32)
+        action, _ = policy.predict(observation)
+        policy.predict(observation)
+
+        self.assertEqual(action.tolist(), [1, 0, 1])
+        self.assertEqual(model.observations[0].shape, (60,))
+        first_history = model.observations[0][
+            V6_ACTION_HISTORY_START : V6_ACTION_HISTORY_START + LEGACY_V5_ACTION_SIZE
+        ]
+        second_history = model.observations[1][
+            V6_ACTION_HISTORY_START : V6_ACTION_HISTORY_START + LEGACY_V5_ACTION_SIZE
+        ]
+        self.assertEqual(first_history.tolist(), [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        self.assertEqual(second_history.tolist(), [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])
+        policy.reset()
+        self.assertEqual(policy.previous_action, 0)
+
+    def test_phase0_rotations_put_each_model_in_each_slot(self):
+        models = [("v5", Path("five")), ("v6", Path("six")), ("v8", Path("eight"))]
+        rotations = _rotations(models)
+
+        for label, path in models:
+            placements = [
+                slot
+                for rotation in rotations
+                for slot, model in rotation.items()
+                if model == (label, path)
+            ]
+            self.assertEqual(sorted(placements), [1, 2, 3])
+
     def test_resume_ppo_configuration_rejects_stale_checkpoint_values(self):
         model = SimpleNamespace(
             lr_schedule=lambda _: 3e-4,
