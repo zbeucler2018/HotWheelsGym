@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 from functools import partial
+from math import isclose
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +85,47 @@ def _ppo_arguments(config: dict[str, Any]) -> tuple[dict[str, Any], dict[str, An
         },
     }
     return ppo, policy_kwargs
+
+
+def _verify_resume_ppo_configuration(model: PPO, ppo: dict[str, Any]) -> None:
+    """Fail loudly if a loaded checkpoint retained stale optimizer settings."""
+
+    scheduled = {
+        "learning_rate": model.lr_schedule(1.0),
+        "clip_range": model.clip_range(1.0),
+    }
+    scalar_names = (
+        "n_steps",
+        "batch_size",
+        "n_epochs",
+        "gamma",
+        "gae_lambda",
+        "ent_coef",
+        "vf_coef",
+        "max_grad_norm",
+    )
+    actual = {name: getattr(model, name) for name in scalar_names}
+    actual.update(scheduled)
+    mismatches = [
+        f"{name}={actual[name]!r} (expected {expected!r})"
+        for name, expected in ppo.items()
+        if name in actual
+        and not isclose(
+            float(actual[name]), float(expected), rel_tol=1e-9, abs_tol=1e-12
+        )
+    ]
+    if mismatches:
+        raise RuntimeError(
+            "resume PPO configuration mismatch: " + ", ".join(mismatches)
+        )
+
+
+def _resume_summary(model: PPO) -> str:
+    return (
+        f"learning_rate={model.lr_schedule(1.0):g} "
+        f"clip_range={model.clip_range(1.0):g} "
+        f"n_epochs={model.n_epochs} batch_size={model.batch_size}"
+    )
 
 
 def main() -> None:
@@ -182,12 +224,17 @@ def main() -> None:
                 resume_path = args.resume_model.expanduser().resolve()
                 model = PPO.load(
                     resume_path,
+                    env=training_env,
                     device=args.device,
                     tensorboard_log=str(run_dir / "tensorboard"),
+                    # SB3 otherwise restores stale training hyperparameters
+                    # from the checkpoint and silently ignores this run's YAML.
+                    custom_objects=dict(ppo),
                 )
                 validate_model_observation_space(model, resume_path)
                 validate_model_action_space(model, resume_path)
-                model.set_env(training_env)
+                _verify_resume_ppo_configuration(model, ppo)
+                print(f"Applied resume PPO configuration: {_resume_summary(model)}")
             else:
                 model = PPO(
                     "MlpPolicy",

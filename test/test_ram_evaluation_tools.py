@@ -2,6 +2,7 @@ import gzip
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
 import gymnasium as gym
 import numpy as np
@@ -20,9 +21,40 @@ from training_scripts.ram_player.common import (
 )
 from training_scripts.ram_player.media import RGBVideoWriter
 from training_scripts.ram_player.sweep import checkpoint_sort_key
+from training_scripts.ram_player.train import _verify_resume_ppo_configuration
 
 
 class RAMEvaluationToolTests(unittest.TestCase):
+    def test_resume_ppo_configuration_rejects_stale_checkpoint_values(self):
+        model = SimpleNamespace(
+            lr_schedule=lambda _: 3e-4,
+            clip_range=lambda _: 0.2,
+            n_steps=1024,
+            batch_size=256,
+            n_epochs=10,
+            gamma=0.995,
+            gae_lambda=0.95,
+            ent_coef=0.005,
+            vf_coef=0.5,
+            max_grad_norm=0.5,
+        )
+        with self.assertRaisesRegex(RuntimeError, "learning_rate"):
+            _verify_resume_ppo_configuration(
+                model,
+                {
+                    "learning_rate": 5e-5,
+                    "clip_range": 0.1,
+                    "n_steps": 1024,
+                    "batch_size": 256,
+                    "n_epochs": 5,
+                    "gamma": 0.995,
+                    "gae_lambda": 0.95,
+                    "ent_coef": 0.002,
+                    "vf_coef": 0.5,
+                    "max_grad_norm": 0.5,
+                },
+            )
+
     def test_evaluation_metric_names_survive_console_truncation(self):
         names = evaluation_metric_names()
         truncated = [("   " + name)[:36] for name in names]

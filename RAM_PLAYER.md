@@ -380,6 +380,12 @@ the learning rate to `5e-5`, halves PPO's clip range and epochs, and trains for
 only 500,000 additional steps. Full start-line evaluation remains the sole
 checkpoint-selection criterion.
 
+When `--resume-model` is used, the trainer explicitly replaces the checkpoint's
+serialized PPO optimizer settings with the selected YAML values and verifies
+the effective learning rate, clip range, epochs, batch size, and rollout
+parameters before learning. This prevents a fine-tune from silently retaining
+the original run's hyperparameters.
+
 The native-button ROM makes all four race slots genuine player-class racers.
 Player 1 continues sampling the hardware keypad; slots 1–3 instead retain the
 independent pressed/released/held masks written by Python. This means steering,
