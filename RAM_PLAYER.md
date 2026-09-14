@@ -242,6 +242,18 @@ or images are stored. Each live racer is projected onto nearby reference-line
 segments, so Player 1 and every model opponent get the same local geometry even
 when they occupy different parts of the track.
 
+Speed uses the racer's 32-bit physics field at `+0xE8`, normalized as
+`clip(raw_speed / 0x12000, 0, 1)`. It is not the integer MPH displayed by the
+HUD. A synchronized full-race probe found that the HUD trails this field by
+approximately one four-frame policy decision and is empirically close to
+`round(raw_speed / 364) - 1`: the formula matched exactly on 76.2% of 4,222
+adjacent valid samples, was within 1 MPH on 94.7%, and within 2 MPH on 96.2%.
+No stable integer, BCD, or ASCII HUD-speed value was found in EWRAM or IWRAM,
+so the displayed number is probably converted transiently by the rendering
+path. The probe reached raw speed 77,894 and clipped the current observation on
+3.15% of samples. V6 deliberately retains the existing scale; this conversion
+is a human-facing diagnostic estimate, not an exact MPH source of truth.
+
 This is observation contract version 6. The racer-local boost meter at `+0xF0`
 is normalized from 0 to its maximum of 980. The same offset was verified against
 the configured Player 1 boost address on every bundled multiplayer track and
