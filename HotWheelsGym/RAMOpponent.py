@@ -392,6 +392,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         if self._reward_config.mode == "time_trial":
             reward = time_trial_race_reward(
                 continuous_advance,
+                jet_boost_acquired=jet_boost_acquired,
                 config=self._reward_config,
                 **reward_arguments,
             )
@@ -422,6 +423,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         info["ram_player_continuous_progress_delta"] = continuous_advance
         info["ram_player_reward_mode"] = self._reward_config.mode
         info["ram_player_action"] = action_components
+        info["ram_player_jet_boost_acquired"] = jet_boost_acquired
         info["ram_player_frame_reward"] = reward
         info["ram_player_raw_frame"] = self._raw_frame
         info["ram_player_track_index"] = track.progress_index

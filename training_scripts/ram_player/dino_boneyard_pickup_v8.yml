@@ -1,0 +1,66 @@
+run_name: dino_ram_player_pickup_v8
+
+# Conservative, pickup-focused fine-tune from the preserved v6 checkpoint.
+# It is deliberately short: promote only a checkpoint that improves full-race
+# time and demonstrates native Jet Boost acquisition from the starting line.
+total_timesteps: 500000
+num_envs: 3
+seed: 2027
+
+environment: HWSTC-dino_boneyard-multi-3
+frame_skip: 4
+max_episode_steps: 4500
+evaluation_max_episode_steps: 6000
+
+opponents: {}
+opponent_state: null
+
+# Half of resets use the real starting grid. Four begin early enough to move
+# from the right wall into the pickup, and one teaches how to exploit a pickup.
+# Every state is near the start, so every episode still rehearses most of the
+# race instead of fragmenting the established full-track driving skill.
+sample_training_states: true
+training_states:
+  - training_scripts/data/states/dino_boneyard_multi.state
+  - training_scripts/data/states/dino_boneyard_multi.state
+  - training_scripts/data/states/dino_boneyard_multi.state
+  - training_scripts/data/states/dino_boneyard_multi.state
+  - training_scripts/data/states/dino_boneyard_multi.state
+  - training_scripts/ram_runs/private/dino_pickup_v8/dino_hairpin_no_jet.state
+  - training_scripts/ram_runs/private/dino_pickup_v8/dino_hairpin_no_jet.state
+  - training_scripts/ram_runs/private/dino_pickup_v8/dino_hairpin_no_jet.state
+  - training_scripts/ram_runs/private/dino_pickup_v8/dino_hairpin_no_jet.state
+  - training_scripts/ram_runs/private/dino_pickup_v8/dino_hairpin_with_jet.state
+
+reward:
+  mode: time_trial
+  progress_scale: 1.0
+  frame_cost: 0.02
+  wall_penalty: 0.1
+  wrong_way_penalty: 0.02
+  respawn_penalty: 10.0
+  rank_gain: 0.25
+  lap_bonus: 5.0
+  finish_bonus: 50.0
+  # Paid only on the native timer's rising edge, never per frame. This makes
+  # the short move toward the middle legible without enforcing a racing line.
+  jet_boost_pickup_bonus: 8.0
+
+eval_every_timesteps: 50000
+eval_episodes: 2
+checkpoint_every_timesteps: 100000
+record_video: true
+
+ppo:
+  learning_rate: 0.00005
+  n_steps: 1024
+  batch_size: 256
+  n_epochs: 5
+  gamma: 0.995
+  gae_lambda: 0.95
+  clip_range: 0.1
+  ent_coef: 0.002
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  policy_layers: [128, 128]
+  value_layers: [128, 128]

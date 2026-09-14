@@ -353,6 +353,33 @@ choice globally, by track sector, and through the hairpin separately for
 Jet-Boost and no-Jet-Boost entries. These metrics are written to TensorBoard,
 evaluation CSV files, and recorded-race JSON sidecars.
 
+### Pickup-focused v8 fine-tune
+
+The v7 run preserved the v6 baseline but never collected Dino Boneyard's Jet
+Boost in a start-line evaluation. Its broad curriculum and `3e-4` learning rate
+eventually damaged full-track driving. The v8 experiment instead uses a short,
+conservative fine-tune whose only extra shaping is an `8.0` one-time reward on
+the native Jet Boost timer's rising edge. It does not reward centerline position
+or possession time, so racing lines remain unrestricted away from the pickup.
+
+Capture a no-boost approach at progress 32, early enough to leave the right
+wall, plus the corresponding native post-pickup state:
+
+```bash
+uv run --no-sync python -m training_scripts.ram_player.create_hairpin_states \
+  --rom rom.gba \
+  --player-model training_scripts/ram_runs/PRIOR_V5/fastest_model.zip \
+  --output-dir training_scripts/ram_runs/private/dino_pickup_v8 \
+  --target-progress 32 \
+  --config training_scripts/ram_player/dino_boneyard_pickup_v8.yml
+```
+
+`dino_boneyard_pickup_v8.yml` weights resets 50% from the genuine starting
+grid, 40% from that early approach, and 10% just after a real pickup. It lowers
+the learning rate to `5e-5`, halves PPO's clip range and epochs, and trains for
+only 500,000 additional steps. Full start-line evaluation remains the sole
+checkpoint-selection criterion.
+
 The native-button ROM makes all four race slots genuine player-class racers.
 Player 1 continues sampling the hardware keypad; slots 1–3 instead retain the
 independent pressed/released/held masks written by Python. This means steering,

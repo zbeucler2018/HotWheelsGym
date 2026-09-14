@@ -565,6 +565,24 @@ class RAMPlayerControlTests(unittest.TestCase):
         self.assertAlmostEqual(fast, 0.48)
         self.assertAlmostEqual(fast - collision, 0.1)
 
+    def test_time_trial_pickup_bonus_is_one_event_not_timer_shaping(self):
+        config = ram.RaceRewardConfig.from_mapping(
+            {"mode": "time_trial", "jet_boost_pickup_bonus": 8.0}
+        )
+        parameters = {
+            "previous_rank": 2,
+            "current_rank": 2,
+            "config": config,
+        }
+        ordinary = ram.time_trial_race_reward(0.25, **parameters)
+        pickup = ram.time_trial_race_reward(
+            0.25,
+            jet_boost_acquired=True,
+            **parameters,
+        )
+
+        self.assertAlmostEqual(pickup - ordinary, 8.0)
+
     def test_time_trial_reward_allows_forward_racing_angles(self):
         parameters = {
             "previous_rank": 2,
