@@ -583,6 +583,31 @@ class RAMPlayerControlTests(unittest.TestCase):
 
         self.assertAlmostEqual(pickup - ordinary, 8.0)
 
+    def test_time_trial_competitive_terms_reward_gaining_and_winning(self):
+        config = ram.RaceRewardConfig.from_mapping(
+            {
+                "mode": "time_trial",
+                "relative_progress_scale": 0.1,
+                "win_bonus": 25.0,
+                "opponent_finish_penalty": 10.0,
+            }
+        )
+        parameters = {
+            "previous_rank": 2,
+            "current_rank": 2,
+            "config": config,
+        }
+        ordinary = ram.time_trial_race_reward(0.25, **parameters)
+        competitive = ram.time_trial_race_reward(
+            0.25,
+            relative_progress_delta=0.5,
+            won_now=True,
+            opponents_finished_now=1,
+            **parameters,
+        )
+
+        self.assertAlmostEqual(competitive - ordinary, 15.05)
+
     def test_time_trial_reward_allows_forward_racing_angles(self):
         parameters = {
             "previous_rank": 2,

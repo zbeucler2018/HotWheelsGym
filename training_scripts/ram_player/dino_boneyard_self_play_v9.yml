@@ -1,0 +1,63 @@
+run_name: dino_ram_player_self_play_v9
+
+# Fine-tune corrected v8 against a balanced frozen v5/v6/v8 league. Every
+# group of three resets rotates each policy through every native opponent slot.
+total_timesteps: 500000
+num_envs: 3
+seed: 2028
+
+environment: HWSTC-dino_boneyard-multi-3
+frame_skip: 4
+# Phase 0 showed traffic can push races past five minutes, so training and
+# evaluation both retain a finish-capable horizon.
+max_episode_steps: 6000
+evaluation_max_episode_steps: 6000
+
+opponents: {}
+opponent_league:
+  v5: training_scripts/ram_runs/dino_ram_player_jet_boost_skid_v5_20260911T025018Z/evaluation_sweep_20260913T025433Z/fastest_model.zip
+  v6: training_scripts/ram_runs/dino_ram_player_factorized_v6_20260913T204756Z/evaluation/best_model.zip
+  v8: training_scripts/ram_runs/dino_ram_player_pickup_v8_corrected_20260914T203738Z/evaluation/best_model.zip
+opponent_state: training_scripts/ram_runs/private/dino_four_players.state
+stock_evaluation_state: training_scripts/data/states/dino_boneyard_multi.state
+
+sample_training_states: false
+training_states: []
+
+reward:
+  mode: time_trial
+  progress_scale: 1.0
+  frame_cost: 0.02
+  wall_penalty: 0.1
+  wrong_way_penalty: 0.02
+  respawn_penalty: 10.0
+  rank_gain: 0.5
+  lap_bonus: 5.0
+  finish_bonus: 50.0
+  jet_boost_pickup_bonus: 8.0
+  # Competitive terms are deliberately smaller than forward progress. They
+  # reward gaining on the leader and winning without making blocking optimal.
+  relative_progress_scale: 0.1
+  win_bonus: 25.0
+  opponent_finish_penalty: 10.0
+
+eval_every_timesteps: 50000
+eval_episodes: 1
+# One balanced three-race slot cycle for every league evaluation.
+league_eval_episodes: 3
+checkpoint_every_timesteps: 50000
+record_video: true
+
+ppo:
+  learning_rate: 0.000025
+  n_steps: 1024
+  batch_size: 256
+  n_epochs: 5
+  gamma: 0.995
+  gae_lambda: 0.95
+  clip_range: 0.1
+  ent_coef: 0.003
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  policy_layers: [128, 128]
+  value_layers: [128, 128]

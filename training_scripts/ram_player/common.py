@@ -43,6 +43,7 @@ MONITOR_INFO_KEYS = (
     "ram_player_finish_frame",
     "ram_player_lap",
     "ram_player_rank",
+    "ram_player_won_now",
     "ram_player_speed",
     "ram_player_boost",
     "ram_player_power_up_type",
@@ -102,6 +103,8 @@ def load_config(path: Path) -> dict[str, Any]:
         raise ValueError("evaluation_max_episode_steps must be at least one")
     if int(config["eval_episodes"]) < 1:
         raise ValueError("eval_episodes must be at least one")
+    if int(config.get("league_eval_episodes", config["eval_episodes"])) < 1:
+        raise ValueError("league_eval_episodes must be at least one")
     if int(config["eval_every_timesteps"]) < 1:
         raise ValueError("eval_every_timesteps must be at least one")
     if int(config["checkpoint_every_timesteps"]) < 1:
@@ -110,6 +113,10 @@ def load_config(path: Path) -> dict[str, Any]:
         raise ValueError("ppo configuration must be a mapping")
     if not isinstance(config["opponents"], dict):
         raise ValueError("opponents must map racer slots to RAM model paths")
+    if not isinstance(config.get("opponent_league", {}), dict):
+        raise ValueError("opponent_league must map model labels to RAM model paths")
+    if config["opponents"] and config.get("opponent_league"):
+        raise ValueError("configure fixed opponents or opponent_league, not both")
     if "reward" in config and not isinstance(config["reward"], dict):
         raise ValueError("reward configuration must be a mapping")
     return config
@@ -145,6 +152,23 @@ def normalize_opponents(raw: Mapping[Any, Any]) -> dict[int, Path]:
             raise FileNotFoundError(path)
         opponents[slot] = path
     return opponents
+
+
+def normalize_opponent_league(raw: Mapping[Any, Any] | None) -> dict[str, Path]:
+    """Resolve a named frozen-policy pool used for balanced slot rotation."""
+
+    league: dict[str, Path] = {}
+    for raw_label, raw_path in (raw or {}).items():
+        label = str(raw_label).strip()
+        if not label:
+            raise ValueError("opponent league labels must be non-empty")
+        path = resolve_repo_path(str(raw_path)).resolve()
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        league[label] = path
+    if league and len(league) < 3:
+        raise ValueError("an opponent league requires at least three models")
+    return league
 
 
 def require_all_opponent_slots(opponents: Mapping[int, Any]) -> None:
@@ -342,12 +366,15 @@ def make_ram_env(
     max_episode_steps: int,
     seed: int,
     opponent_paths: Mapping[int, str] | None = None,
+    opponent_league: Mapping[str, str] | None = None,
     state_path: str | None = None,
     state_paths: Sequence[str | None] | None = None,
     monitor_path: str | None = None,
     reward_config: Mapping[str, object] | None = None,
 ) -> gym.Env:
     base = HotWheelsGym.make(ENV_ID, render_mode="rgb_array")
+    if opponent_paths and opponent_league:
+        raise ValueError("provide fixed opponents or an opponent league, not both")
     if state_path and state_paths:
         raise ValueError("provide state_path or state_paths, not both")
     if state_path:
@@ -360,19 +387,27 @@ def make_ram_env(
     env: gym.Env = base
     if state_paths:
         env = InitialStatePool(env, state_paths, seed=seed)
-    if opponent_paths:
-        models = {}
-        for slot, path in opponent_paths.items():
+    if opponent_paths or opponent_league:
+        models: dict[int, Any] = {}
+        league_models: dict[str, Any] = {}
+
+        def load_policy(path: str) -> Any:
             model = PPO.load(path, device="cpu")
             if is_legacy_v5_policy(model):
-                models[int(slot)] = LegacyV5PolicyAdapter(model)
-            else:
-                validate_model_observation_space(model, path)
-                validate_model_action_space(model, path)
-                models[int(slot)] = model
+                return LegacyV5PolicyAdapter(model)
+            validate_model_observation_space(model, path)
+            validate_model_action_space(model, path)
+            return model
+
+        for slot, path in (opponent_paths or {}).items():
+            models[int(slot)] = load_policy(path)
+        for label, path in (opponent_league or {}).items():
+            league_models[str(label)] = load_policy(path)
         env = DinoRAMModelOpponentEnv(
             env,
             models,
+            opponent_league=league_models,
+            seed=seed,
             action_repeat=frame_skip,
         )
     env = DinoRAMPlayerEnv(env, reward_config=reward_config)
@@ -392,6 +427,7 @@ def write_run_metadata(
     source_rom: Path,
     active_rom: Path,
     opponents: Mapping[int, Path],
+    opponent_league: Mapping[str, Path] | None = None,
 ) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     with (run_dir / "resolved_config.yml").open("w") as handle:
@@ -432,6 +468,10 @@ def write_run_metadata(
         "opponents": {
             str(slot): {"path": str(path), "sha1": file_sha1(path)}
             for slot, path in opponents.items()
+        },
+        "opponent_league": {
+            label: {"path": str(path), "sha1": file_sha1(path)}
+            for label, path in (opponent_league or {}).items()
         },
     }
     with (run_dir / "metadata.json").open("w") as handle:

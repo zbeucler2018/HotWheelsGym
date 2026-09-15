@@ -6,7 +6,7 @@ import csv
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from statistics import fmean
-from typing import Any
+from typing import Any, Callable
 
 import gymnasium as gym
 from stable_baselines3.common.callbacks import BaseCallback
@@ -61,6 +61,7 @@ class RAMEvaluation:
     mean_length: float
     mean_completion: float
     finish_rate: float
+    win_rate: float
     mean_finish_frames: float
     mean_speed: float
     mean_rank: float
@@ -88,6 +89,7 @@ class RAMEvaluation:
     mean_lap_2_seconds: float
     mean_lap_3_seconds: float
     selection_score: float
+    competitive_selection_score: float
     action_metrics: dict[str, float]
     sector_metrics: dict[str, float]
 
@@ -240,6 +242,7 @@ def evaluate_ram_policy(
     lengths: list[int] = []
     completions: list[float] = []
     finishes: list[float] = []
+    wins: list[float] = []
     finish_frames: list[float] = []
     mean_speeds: list[float] = []
     ranks: list[float] = []
@@ -271,6 +274,7 @@ def evaluate_ram_policy(
     lap_sector_frame_totals = _empty_lap_sector_values()
     lap_sector_samples = _empty_lap_sector_values()
     scores: list[float] = []
+    competitive_scores: list[float] = []
     hairpin_action_totals = {
         group: dict.fromkeys(RAM_ACTION_METRIC_NAMES, 0.0)
         for group in HAIRPIN_ACTION_GROUPS
@@ -325,6 +329,8 @@ def evaluate_ram_policy(
             skid_frames += int(info.get("ram_decision_skid_frames", 0))
 
         finished = bool(info.get("ram_player_finished", False))
+        rank = int(info.get("ram_player_rank", 4))
+        won = finished and rank == 1
         completion = float(info.get("ram_player_completion", 0.0))
         finish_frame = info.get("ram_player_finish_frame")
         normalized_time = (
@@ -334,15 +340,21 @@ def evaluate_ram_policy(
         )
         # Finish rate dominates partial progress; among finishers, time wins.
         score = 11.0 - normalized_time if finished else completion
+        competitive_score = (
+            21.0 - normalized_time
+            if won
+            else (11.0 - normalized_time if finished else completion)
+        )
 
         rewards.append(episode_reward)
         lengths.append(episode_length)
         completions.append(completion)
         finishes.append(float(finished))
+        wins.append(float(won))
         if finished and finish_frame is not None:
             finish_frames.append(float(finish_frame))
         mean_speeds.append(fmean(speeds) if speeds else 0.0)
-        ranks.append(float(info.get("ram_player_rank", 4)))
+        ranks.append(float(rank))
         lateral_offsets.append(lateral_total / max(1, observed_frames))
         heading_alignments.append(heading_total / max(1, observed_frames))
         wall_contact_rates.append(wall_frames / max(1, observed_frames))
@@ -404,12 +416,14 @@ def evaluate_ram_policy(
         _accumulate_sector_info(sector_totals, info)
         _accumulate_lap_sector_info(lap_sector_frame_totals, lap_sector_samples, info)
         scores.append(score)
+        competitive_scores.append(competitive_score)
 
     return RAMEvaluation(
         mean_reward=fmean(rewards),
         mean_length=fmean(lengths),
         mean_completion=fmean(completions),
         finish_rate=fmean(finishes),
+        win_rate=fmean(wins),
         mean_finish_frames=fmean(finish_frames) if finish_frames else 0.0,
         mean_speed=fmean(mean_speeds),
         mean_rank=fmean(ranks),
@@ -443,6 +457,7 @@ def evaluate_ram_policy(
         mean_lap_2_seconds=fmean(lap_splits[2]) if lap_splits[2] else 0.0,
         mean_lap_3_seconds=fmean(lap_splits[3]) if lap_splits[3] else 0.0,
         selection_score=fmean(scores),
+        competitive_selection_score=fmean(competitive_scores),
         action_metrics={
             **{
                 f"race_{name}_rate": (
@@ -472,20 +487,28 @@ class RAMEvalCallback(BaseCallback):
 
     def __init__(
         self,
-        eval_env: gym.Env,
+        eval_env: gym.Env | None,
         *,
+        eval_env_factory: Callable[[], gym.Env] | None = None,
         eval_every_timesteps: int,
         episodes: int,
         max_episode_frames: int,
         output_dir: Path,
+        metric_prefix: str = "eval",
+        selection_metric: str = "selection_score",
         verbose: int = 1,
     ) -> None:
         super().__init__(verbose=verbose)
+        if (eval_env is None) == (eval_env_factory is None):
+            raise ValueError("provide eval_env or eval_env_factory, not both")
         self.eval_env = eval_env
+        self.eval_env_factory = eval_env_factory
         self.eval_every_timesteps = int(eval_every_timesteps)
         self.episodes = int(episodes)
         self.max_episode_frames = int(max_episode_frames)
         self.output_dir = output_dir
+        self.metric_prefix = metric_prefix
+        self.selection_metric = selection_metric
         self.best_score = float("-inf")
         self.next_evaluation = self.eval_every_timesteps
         self.last_evaluation = -1
@@ -498,15 +521,21 @@ class RAMEvalCallback(BaseCallback):
                 csv.writer(handle).writerow(("timesteps", *evaluation_metric_names()))
 
     def _record_evaluation(self) -> None:
-        result = evaluate_ram_policy(
-            self.model,
-            self.eval_env,
-            self.episodes,
-            max_episode_frames=self.max_episode_frames,
-        )
+        eval_env = self.eval_env_factory() if self.eval_env_factory else self.eval_env
+        assert eval_env is not None
+        try:
+            result = evaluate_ram_policy(
+                self.model,
+                eval_env,
+                self.episodes,
+                max_episode_frames=self.max_episode_frames,
+            )
+        finally:
+            if self.eval_env_factory is not None:
+                eval_env.close()
         values = evaluation_values(result)
         for name, value in values.items():
-            self.logger.record(f"eval/{name}", value)
+            self.logger.record(f"{self.metric_prefix}/{name}", value)
         self.logger.dump(self.num_timesteps)
         with self.csv_path.open("a", newline="") as handle:
             csv.writer(handle).writerow((self.num_timesteps, *values.values()))
@@ -515,8 +544,10 @@ class RAMEvalCallback(BaseCallback):
         if self.verbose:
             print(
                 "RAM Player 1 eval "
-                f"steps={self.num_timesteps} score={result.selection_score:.4f} "
+                f"[{self.metric_prefix}] steps={self.num_timesteps} "
+                f"score={getattr(result, self.selection_metric):.4f} "
                 f"finish={result.finish_rate:.0%} "
+                f"win={result.win_rate:.0%} "
                 f"completion={result.mean_completion:.1%} "
                 f"finish_frames={result.mean_finish_frames:.1f} "
                 f"rank={result.mean_rank:.2f} "
@@ -531,8 +562,9 @@ class RAMEvalCallback(BaseCallback):
                 f"{result.mean_lap_2_seconds:.2f}/"
                 f"{result.mean_lap_3_seconds:.2f}s"
             )
-        if result.selection_score > self.best_score:
-            self.best_score = result.selection_score
+        score = float(getattr(result, self.selection_metric))
+        if score > self.best_score:
+            self.best_score = score
             self.model.save(self.output_dir / "best_model")
             if self.verbose:
                 print(f"Saved new best model to {self.output_dir / 'best_model.zip'}")

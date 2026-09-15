@@ -433,6 +433,33 @@ win rate, time, and pickup behavior plus every NPC's rank, completion, lap
 splits, and Jet Boost pickups. JSON, Markdown, TensorBoard scalars, and one MP4
 per slot rotation are written under the ignored `ram_runs` tree.
 
+Phase 0 confirmed that the frozen v5/v6/v8 policies materially change the race:
+Player 1 won two of three rotations, lost to v6 and v5 in the other, and every
+NPC policy demonstrated native Jet Boost acquisition. Phase 1 fine-tunes the
+corrected v8 policy against that frozen league:
+
+```bash
+uv run --no-sync python -m training_scripts.ram_player.train \
+  --rom rom.gba \
+  --config training_scripts/ram_player/dino_boneyard_self_play_v9.yml \
+  --resume-model training_scripts/ram_runs/dino_ram_player_pickup_v8_corrected_20260914T203738Z/evaluation/best_model.zip
+```
+
+The league is randomized in balanced three-episode cycles: a shuffled base
+ordering is rotated so every selected model occupies every NPC slot once before
+the next shuffle. Training retains forward progress, elapsed-time, wall,
+respawn, finish, and pickup rewards. Small relative-progress, win, and
+opponent-finish terms add race pressure without making blocking more valuable
+than driving forward.
+
+Two evaluations run throughout training. `evaluation/` and the `eval/*`
+TensorBoard namespace use the stock CPU state and select the fastest reliable
+finisher. `league_evaluation/` and `league_eval/*` use one balanced three-race
+cycle and select by wins before finish time. At successful completion the stock
+selected checkpoint is recorded once against stock opponents and once against
+the frozen league; MP4s remain on disk rather than being embedded in
+TensorBoard.
+
 Stable-Retro savestates restore racer objects after construction. Therefore an
 old checked-in multiplayer state still contains stock CPU objects even with the
 new ROM. First create one private Dino Boneyard start-line state under the

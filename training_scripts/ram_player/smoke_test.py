@@ -9,6 +9,7 @@ from .common import (
     DEFAULT_CONFIG,
     load_config,
     make_ram_env,
+    normalize_opponent_league,
     normalize_opponents,
     opponent_state_path,
     prepare_rom,
@@ -57,21 +58,26 @@ def main() -> None:
     if args.opponent_state is not None:
         config["opponent_state"] = str(args.opponent_state.expanduser().resolve())
     opponents = normalize_opponents(config["opponents"])
+    opponent_league = normalize_opponent_league(config.get("opponent_league"))
     require_all_opponent_slots(opponents)
+    has_model_opponents = bool(opponents or opponent_league)
     source_rom = args.rom.expanduser().resolve()
     active_rom = prepare_rom(
         source_rom,
-        tuple(opponents),
+        (1, 2, 3) if opponent_league else tuple(opponents),
         Path("training_scripts/ram_runs/preflight_private").resolve(),
     )
     states = (
-        [opponent_state_path(config)] if opponents else training_state_paths(config)
+        [opponent_state_path(config)]
+        if has_model_opponents
+        else training_state_paths(config)
     )
     env = make_ram_env(
         frame_skip=int(config["frame_skip"]),
         max_episode_steps=int(config["max_episode_steps"]),
         seed=int(config["seed"]),
         opponent_paths={slot: str(path) for slot, path in opponents.items()},
+        opponent_league={label: str(path) for label, path in opponent_league.items()},
         state_path=str(states[0]) if states[0] else None,
         reward_config=config.get("reward"),
     )
@@ -98,9 +104,10 @@ def main() -> None:
             f"jet_boost={info['ram_player_jet_boost_remaining']} "
             f"skid={int(info['ram_player_skid_active'])}"
         )
-        for slot in opponents:
+        for slot in ((1, 2, 3) if opponent_league else opponents):
             print(
                 f"NPC slot {slot}: "
+                f"policy={info.get(f'ram_npc_{slot}_policy_label', 'fixed')} "
                 f"completion={float(info[f'ram_npc_{slot}_completion']):.1%} "
                 f"rank={int(info[f'ram_npc_{slot}_rank'])} "
                 f"boost={int(info[f'ram_npc_{slot}_boost'])} "

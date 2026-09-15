@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
+import random
 from typing import Any, Protocol
 
 import gymnasium as gym
@@ -54,6 +55,22 @@ class PredictPolicy(Protocol):
 
 RESPAWN_FLASH_CHANNEL_FLOOR = 235
 RESPAWN_FLASH_PIXEL_FRACTION = 0.9
+
+
+def _balanced_league_rotations(
+    league: tuple[tuple[str, PredictPolicy], ...],
+    slots: tuple[int, ...],
+    randomizer: random.Random,
+) -> list[tuple[tuple[str, PredictPolicy], ...]]:
+    """Build a shuffled cycle in which every selected policy uses every slot."""
+
+    selected = randomizer.sample(league, len(slots))
+    return [
+        tuple(
+            selected[(index + offset) % len(selected)] for index in range(len(selected))
+        )
+        for offset in range(len(selected))
+    ]
 
 
 def _is_white_respawn_frame(observation: Any) -> bool:
@@ -221,6 +238,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         self._raw_frame = 0
         self._finished = False
         self._finish_frame: int | None = None
+        self._finished_opponents: set[int] = set()
         self._lap_timing: LapSplitTracker | None = None
         self._player_respawn_pending = False
         self._jet_boost_pickups = 0
@@ -272,6 +290,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         self._raw_frame = 0
         self._finished = False
         self._finish_frame = None
+        self._finished_opponents = set()
         total_laps = int(_bare_env(self.env).total_laps)
         self._lap_timing = LapSplitTracker.start(
             self.progress_tracker.current_lap(0, self._states[0]), total_laps
@@ -320,6 +339,11 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         previous_track = self._track_pose
         previous_rank = self.progress_tracker.rank(0, previous_states)
         previous_lap = self.progress_tracker.current_lap(0, previous)
+        previous_best_opponent_progress = max(
+            self.progress_tracker.total_progress(slot, state)
+            for slot, state in previous_states.items()
+            if slot != 0
+        )
         native_action = player_buttons_from_action(
             action_components, tuple(_bare_env(self.env).buttons)
         )
@@ -332,6 +356,20 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         current_rank = self.progress_tracker.rank(0, current_states)
         current_lap = self.progress_tracker.current_lap(0, current)
         total_laps = int(_bare_env(self.env).total_laps)
+        current_best_opponent_progress = max(
+            self.progress_tracker.total_progress(slot, state)
+            for slot, state in current_states.items()
+            if slot != 0
+        )
+        currently_finished_opponents = {
+            slot
+            for slot, state in current_states.items()
+            if slot != 0 and self.progress_tracker.current_lap(slot, state) > total_laps
+        }
+        opponents_finished_now = len(
+            currently_finished_opponents - self._finished_opponents
+        )
+        self._finished_opponents = currently_finished_opponents
         game_reports_finish = bool(terminated and int(info.get("lap", 0)) >= total_laps)
         finished_now = not self._finished and (
             current_lap > total_laps or game_reports_finish
@@ -354,6 +392,9 @@ class DinoRAMPlayerEnv(gym.Wrapper):
             previous_track,
             track,
             native_advance=advance,
+        )
+        relative_progress_delta = continuous_advance - (
+            current_best_opponent_progress - previous_best_opponent_progress
         )
         player_respawn_pending = self._race.respawn_pending(0)
         respawned_now = player_respawn_pending and not self._player_respawn_pending
@@ -393,6 +434,9 @@ class DinoRAMPlayerEnv(gym.Wrapper):
             reward = time_trial_race_reward(
                 continuous_advance,
                 jet_boost_acquired=jet_boost_acquired,
+                relative_progress_delta=relative_progress_delta,
+                won_now=finished_now and current_rank == 1,
+                opponents_finished_now=opponents_finished_now,
                 config=self._reward_config,
                 **reward_arguments,
             )
@@ -421,6 +465,9 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         )
         info["ram_player_progress_delta"] = advance
         info["ram_player_continuous_progress_delta"] = continuous_advance
+        info["ram_player_relative_progress_delta"] = relative_progress_delta
+        info["ram_player_opponents_finished_now"] = opponents_finished_now
+        info["ram_player_won_now"] = finished_now and current_rank == 1
         info["ram_player_reward_mode"] = self._reward_config.mode
         info["ram_player_action"] = action_components
         info["ram_player_jet_boost_acquired"] = jet_boost_acquired
@@ -464,6 +511,9 @@ class RAMActionRepeat(gym.Wrapper):
         jet_boost_frames = 0
         jet_boost_pickups = 0
         skid_frames = 0
+        relative_progress_delta = 0.0
+        opponents_finished = 0
+        won = False
         observation: Any = None
         info: dict[str, Any] = {}
         terminated = truncated = False
@@ -483,6 +533,11 @@ class RAMActionRepeat(gym.Wrapper):
             jet_boost_frames += int(bool(info["ram_player_jet_boost_active"]))
             jet_boost_pickups += int(bool(info["ram_player_jet_boost_acquired"]))
             skid_frames += int(bool(info["ram_player_skid_active"]))
+            relative_progress_delta += float(
+                info.get("ram_player_relative_progress_delta", 0.0)
+            )
+            opponents_finished += int(info.get("ram_player_opponents_finished_now", 0))
+            won = won or bool(info.get("ram_player_won_now", False))
             frames += 1
             if terminated or truncated:
                 break
@@ -502,6 +557,9 @@ class RAMActionRepeat(gym.Wrapper):
         info["ram_decision_jet_boost_frames"] = jet_boost_frames
         info["ram_decision_jet_boost_pickups"] = jet_boost_pickups
         info["ram_decision_skid_frames"] = skid_frames
+        info["ram_decision_relative_progress_delta"] = relative_progress_delta
+        info["ram_decision_opponents_finished"] = opponents_finished
+        info["ram_decision_won"] = won
         sectors = getattr(self.env, "_sectors", None)
         if isinstance(sectors, DinoSectorTelemetry):
             info.update(_sector_info(sectors))
@@ -514,22 +572,38 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
     def __init__(
         self,
         env: gym.Env,
-        opponents: Mapping[int, PredictPolicy],
+        opponents: Mapping[int, PredictPolicy] | None = None,
         *,
+        opponent_league: Mapping[str, PredictPolicy] | None = None,
+        seed: int = 0,
         deterministic: bool = True,
         action_repeat: int = 4,
         mask_opponent_respawn_flashes: bool = True,
     ) -> None:
         _validate_dino_multi(env)
-        slots = tuple(sorted(opponents))
-        if not slots:
-            raise ValueError("provide at least one RAM opponent policy")
+        if opponents and opponent_league:
+            raise ValueError("provide fixed opponents or an opponent league, not both")
+        if opponent_league:
+            if len(opponent_league) < 3:
+                raise ValueError("an opponent league requires at least three policies")
+            slots = (1, 2, 3)
+        else:
+            slots = tuple(sorted(opponents or {}))
+            if not slots:
+                raise ValueError("provide at least one RAM opponent policy")
         if any(slot not in (1, 2, 3) for slot in slots):
             raise ValueError("RAM opponent slots must be 1, 2, or 3")
         if action_repeat < 1:
             raise ValueError("action_repeat must be at least one")
         super().__init__(env)
-        self.opponents = dict(opponents)
+        self._slots = slots
+        self._league = tuple(
+            (str(label), policy) for label, policy in (opponent_league or {}).items()
+        )
+        self._league_rotations: list[tuple[tuple[str, PredictPolicy], ...]] = []
+        self._random = random.Random(seed)
+        self.opponents = dict(opponents or {})
+        self._opponent_labels = {slot: f"slot_{slot}" for slot in self.opponents}
         self.deterministic = deterministic
         self.action_repeat = action_repeat
         self.mask_opponent_respawn_flashes = mask_opponent_respawn_flashes
@@ -549,6 +623,26 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         self._render_override: np.ndarray | None = None
         self._masking_opponent_respawn = False
         self._masked_respawn_frames = 0
+
+    def _assign_league(self, seed: int | None) -> None:
+        if not self._league:
+            return
+        if seed is not None:
+            self._random.seed(seed)
+            self._league_rotations.clear()
+        if not self._league_rotations:
+            self._league_rotations = _balanced_league_rotations(
+                self._league, self._slots, self._random
+            )
+        assignment = self._league_rotations.pop(0)
+        self.opponents = {
+            slot: labelled_policy[1]
+            for slot, labelled_policy in zip(self._slots, assignment)
+        }
+        self._opponent_labels = {
+            slot: labelled_policy[0]
+            for slot, labelled_policy in zip(self._slots, assignment)
+        }
 
     def _observation(self, slot: int) -> np.ndarray:
         if (
@@ -570,9 +664,10 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         )
 
     def reset(self, **kwargs: Any) -> tuple[Any, dict[str, Any]]:
+        self._assign_league(kwargs.get("seed"))
         observation, info = self.env.reset(**kwargs)
         self._race = RaceMemory(_bare_env(self.env).data.memory)
-        slots = tuple(sorted(self.opponents))
+        slots = self._slots
         _validate_slots(self.env, self._race, slots)
         self._states = read_racer_states(self._race)
         self._previous_states = dict(self._states)
@@ -626,6 +721,7 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
             info[f"ram_npc_{slot}_boost_active"] = False
             info[f"ram_npc_{slot}_jet_boost_acquired"] = False
             info[f"ram_npc_{slot}_jet_boost_pickups"] = 0
+            info[f"ram_npc_{slot}_policy_label"] = self._opponent_labels[slot]
         return observation, info
 
     def step(self, player_action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
@@ -749,6 +845,7 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
             info[f"{prefix}buttons_pressed"] = buttons.pressed
             info[f"{prefix}buttons_released"] = buttons.released
             info[f"{prefix}buttons_held"] = buttons.held
+            info[f"{prefix}policy_label"] = self._opponent_labels[slot]
         return observation, reward, terminated, truncated, info
 
     def render(self) -> Any:

@@ -1,4 +1,5 @@
 import gzip
+import random
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -7,7 +8,10 @@ from types import SimpleNamespace
 import gymnasium as gym
 import numpy as np
 
-from HotWheelsGym.RAMOpponent import _is_white_respawn_frame
+from HotWheelsGym.RAMOpponent import (
+    _balanced_league_rotations,
+    _is_white_respawn_frame,
+)
 from training_scripts.ram_player.callbacks import (
     evaluate_ram_policy,
     evaluation_metric_names,
@@ -31,6 +35,19 @@ from training_scripts.ram_player.train import _verify_resume_ppo_configuration
 
 
 class RAMEvaluationToolTests(unittest.TestCase):
+    def test_balanced_league_cycle_puts_each_policy_in_each_slot(self):
+        league = tuple((label, object()) for label in ("v5", "v6", "v8"))
+        rotations = _balanced_league_rotations(league, (1, 2, 3), random.Random(2028))
+
+        for label, _ in league:
+            placements = [
+                slot
+                for rotation in rotations
+                for slot, entry in zip((1, 2, 3), rotation)
+                if entry[0] == label
+            ]
+            self.assertEqual(sorted(placements), [1, 2, 3])
+
     def test_legacy_v5_policy_adapter_translates_observation_and_action(self):
         class FakeLegacyModel:
             observation_space = gym.spaces.Box(-1.0, 1.0, (60,), np.float32)
@@ -229,6 +246,7 @@ class RAMEvaluationToolTests(unittest.TestCase):
             CoastModel(), OneStepEnv(), 1, max_episode_frames=4
         )
         self.assertEqual(result.mean_abs_lateral_offset, 0.125)
+        self.assertEqual(result.win_rate, 0.0)
         self.assertEqual(result.mean_heading_alignment, 0.75)
         self.assertEqual(result.wall_contact_rate, 0.25)
         self.assertEqual(result.mean_respawns, 1.0)

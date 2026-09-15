@@ -111,6 +111,9 @@ class RaceRewardConfig:
     lap_bonus: float = 5.0
     finish_bonus: float = 50.0
     jet_boost_pickup_bonus: float = 0.0
+    relative_progress_scale: float = 0.0
+    win_bonus: float = 0.0
+    opponent_finish_penalty: float = 0.0
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, object] | None) -> "RaceRewardConfig":
@@ -130,6 +133,9 @@ class RaceRewardConfig:
             lap_bonus=float(raw.get("lap_bonus", 5.0)),
             finish_bonus=float(raw.get("finish_bonus", 50.0)),
             jet_boost_pickup_bonus=float(raw.get("jet_boost_pickup_bonus", 0.0)),
+            relative_progress_scale=float(raw.get("relative_progress_scale", 0.0)),
+            win_bonus=float(raw.get("win_bonus", 0.0)),
+            opponent_finish_penalty=float(raw.get("opponent_finish_penalty", 0.0)),
         )
         if config.mode not in {"legacy", "time_trial"}:
             raise ValueError("RAM reward mode must be 'legacy' or 'time_trial'")
@@ -143,6 +149,9 @@ class RaceRewardConfig:
             "lap_bonus",
             "finish_bonus",
             "jet_boost_pickup_bonus",
+            "relative_progress_scale",
+            "win_bonus",
+            "opponent_finish_penalty",
         )
         if any(getattr(config, name) < 0 for name in nonnegative):
             raise ValueError("RAM reward weights must be nonnegative")
@@ -802,6 +811,9 @@ def time_trial_race_reward(
     heading_alignment: float = 1.0,
     respawned_now: bool = False,
     jet_boost_acquired: bool = False,
+    relative_progress_delta: float = 0.0,
+    won_now: bool = False,
+    opponents_finished_now: int = 0,
     config: RaceRewardConfig | None = None,
 ) -> float:
     """Reward useful forward progress while making elapsed frames expensive."""
@@ -820,4 +832,7 @@ def time_trial_race_reward(
         + weights.lap_bonus * completed_laps
         + (weights.finish_bonus if finished_now else 0.0)
         + (weights.jet_boost_pickup_bonus if jet_boost_acquired else 0.0)
+        + weights.relative_progress_scale * relative_progress_delta
+        + (weights.win_bonus if won_now else 0.0)
+        - weights.opponent_finish_penalty * opponents_finished_now
     )
