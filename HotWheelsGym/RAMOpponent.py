@@ -73,6 +73,14 @@ def _balanced_league_rotations(
     ]
 
 
+def _newly_finished_slots(seen: set[int], current: set[int]) -> set[int]:
+    """Return first-time finishers while keeping finish accounting monotonic."""
+
+    newly_finished = current - seen
+    seen.update(current)
+    return newly_finished
+
+
 def _is_white_respawn_frame(observation: Any) -> bool:
     """Recognize the full-screen white transition used by racer respawns."""
 
@@ -367,9 +375,10 @@ class DinoRAMPlayerEnv(gym.Wrapper):
             if slot != 0 and self.progress_tracker.current_lap(slot, state) > total_laps
         }
         opponents_finished_now = len(
-            currently_finished_opponents - self._finished_opponents
+            _newly_finished_slots(
+                self._finished_opponents, currently_finished_opponents
+            )
         )
-        self._finished_opponents = currently_finished_opponents
         game_reports_finish = bool(terminated and int(info.get("lap", 0)) >= total_laps)
         finished_now = not self._finished and (
             current_lap > total_laps or game_reports_finish

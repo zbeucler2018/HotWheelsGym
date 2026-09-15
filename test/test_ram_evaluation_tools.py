@@ -11,6 +11,7 @@ import numpy as np
 from HotWheelsGym.RAMOpponent import (
     _balanced_league_rotations,
     _is_white_respawn_frame,
+    _newly_finished_slots,
 )
 from training_scripts.ram_player.callbacks import (
     evaluate_ram_policy,
@@ -35,6 +36,14 @@ from training_scripts.ram_player.train import _verify_resume_ppo_configuration
 
 
 class RAMEvaluationToolTests(unittest.TestCase):
+    def test_opponent_finish_accounting_is_one_shot_across_state_flicker(self):
+        seen: set[int] = set()
+
+        self.assertEqual(_newly_finished_slots(seen, {1}), {1})
+        self.assertEqual(_newly_finished_slots(seen, set()), set())
+        self.assertEqual(_newly_finished_slots(seen, {1, 2}), {2})
+        self.assertEqual(seen, {1, 2})
+
     def test_balanced_league_cycle_puts_each_policy_in_each_slot(self):
         league = tuple((label, object()) for label in ("v5", "v6", "v8"))
         rotations = _balanced_league_rotations(league, (1, 2, 3), random.Random(2028))

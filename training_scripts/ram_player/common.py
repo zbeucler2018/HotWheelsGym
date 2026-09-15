@@ -416,7 +416,6 @@ def make_ram_env(
     if monitor_path:
         Path(monitor_path).parent.mkdir(parents=True, exist_ok=True)
         env = Monitor(env, filename=monitor_path, info_keywords=MONITOR_INFO_KEYS)
-    env.reset(seed=seed)
     return env
 
 

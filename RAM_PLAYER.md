@@ -450,7 +450,8 @@ ordering is rotated so every selected model occupies every NPC slot once before
 the next shuffle. Training retains forward progress, elapsed-time, wall,
 respawn, finish, and pickup rewards. Small relative-progress, win, and
 opponent-finish terms add race pressure without making blocking more valuable
-than driving forward.
+than driving forward. Opponent finishes are counted once per slot even if the
+game's lap/finish memory briefly flickers during a finish transition.
 
 Two evaluations run throughout training. `evaluation/` and the `eval/*`
 TensorBoard namespace use the stock CPU state and select the fastest reliable
@@ -458,7 +459,9 @@ finisher. `league_evaluation/` and `league_eval/*` use one balanced three-race
 cycle and select by wins before finish time. At successful completion the stock
 selected checkpoint is recorded once against stock opponents and once against
 the frozen league; MP4s remain on disk rather than being embedded in
-TensorBoard.
+TensorBoard. Environment construction does not consume a reset, so the first
+explicit evaluation reset begins the first rotation and those three races are
+exactly one complete balanced cycle.
 
 Stable-Retro savestates restore racer objects after construction. Therefore an
 old checked-in multiplayer state still contains stock CPU objects even with the
