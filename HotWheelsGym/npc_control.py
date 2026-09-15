@@ -12,6 +12,7 @@ EWRAM_SIZE = 0x40000
 
 PLAYER_RACER_VTABLE = 0x0817C430
 CPU_RACER_VTABLE = 0x0817B6D4
+POWER_UP_VTABLE = 0x0817C598
 RACER_MANAGER_OFFSET = 0x50
 RACER_VEHICLE_INDEX_OFFSET = 0xDC
 RACER_CURRENT_HEADING_OFFSET = 0xDE
@@ -27,6 +28,14 @@ RACER_SKID_ACTIVE_OFFSET = 0x27D
 RACER_PRESSED_OFFSET = 0x302
 RACER_RELEASED_OFFSET = 0x304
 RACER_HELD_OFFSET = 0x306
+
+POWER_UP_STATE_OFFSET = 0x5
+POWER_UP_X_OFFSET = 0x8
+POWER_UP_Y_OFFSET = 0xC
+POWER_UP_Z_OFFSET = 0x10
+POWER_UP_TYPE_OFFSET = 0x16
+POWER_UP_RESPAWN_TIMER_OFFSET = 0x18
+POWER_UP_AVAILABLE_STATE = 0
 
 MANAGER_PLAYER_COUNT_OFFSET = 0x448
 MANAGER_CPU_COUNT_OFFSET = 0x449
@@ -110,6 +119,23 @@ class RacerState:
         if self.power_up_type != JET_BOOST_POWER_UP_TYPE:
             return 0
         return min(self.power_up_timer, MAX_JET_BOOST_TIMER)
+
+
+@dataclass(frozen=True)
+class PowerUpState:
+    """One live track pickup discovered by its native object vtable."""
+
+    address: int
+    state: int
+    kind: int
+    respawn_timer: int
+    x: int
+    y: int
+    z: int
+
+    @property
+    def available(self) -> bool:
+        return self.state == POWER_UP_AVAILABLE_STATE
 
 
 def _read_u8(memory: MemoryView, address: int) -> int:
@@ -204,6 +230,49 @@ def discover_race_layout(memory: MemoryView) -> RaceLayout:
         addresses = ", ".join(f"{address:#010x}" for address in sorted(layouts))
         raise RuntimeError(f"found multiple plausible race managers: {addresses}")
     return next(iter(layouts.values()))
+
+
+def discover_power_up_addresses(memory: MemoryView) -> tuple[int, ...]:
+    """Discover live track-pickup objects without relying on fixed EWRAM addresses."""
+
+    addresses: list[int] = []
+    for address in sorted(_aligned_hits(memory.blocks, POWER_UP_VTABLE)):
+        if not EWRAM_BASE <= address < EWRAM_BASE + EWRAM_SIZE:
+            continue
+        try:
+            state = _read_u8(memory, address + POWER_UP_STATE_OFFSET)
+            kind = _read_u8(memory, address + POWER_UP_TYPE_OFFSET)
+            x = _signed_u32(_read_u32(memory, address + POWER_UP_X_OFFSET))
+            z = _signed_u32(_read_u32(memory, address + POWER_UP_Z_OFFSET))
+        except (KeyError, ValueError):
+            continue
+        if state not in {0, 2, 3} or kind > 0xF:
+            continue
+        if not (-(1 << 27) < x < (1 << 27)) or not (-(1 << 27) < z < (1 << 27)):
+            continue
+        addresses.append(address)
+    if not addresses:
+        raise RuntimeError("could not discover active Hot Wheels power-up objects")
+    return tuple(addresses)
+
+
+def read_power_up_states(
+    memory: MemoryView, addresses: tuple[int, ...]
+) -> tuple[PowerUpState, ...]:
+    """Read dynamic state from a previously discovered pickup-object layout."""
+
+    return tuple(
+        PowerUpState(
+            address=address,
+            state=_read_u8(memory, address + POWER_UP_STATE_OFFSET),
+            kind=_read_u8(memory, address + POWER_UP_TYPE_OFFSET),
+            respawn_timer=_read_u8(memory, address + POWER_UP_RESPAWN_TIMER_OFFSET),
+            x=_signed_u32(_read_u32(memory, address + POWER_UP_X_OFFSET)),
+            y=_signed_u32(_read_u32(memory, address + POWER_UP_Y_OFFSET)),
+            z=_signed_u32(_read_u32(memory, address + POWER_UP_Z_OFFSET)),
+        )
+        for address in addresses
+    )
 
 
 class RaceMemory:

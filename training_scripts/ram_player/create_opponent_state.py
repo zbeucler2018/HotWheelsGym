@@ -19,6 +19,7 @@ from .common import (
     validate_model_action_space,
     validate_model_observation_space,
 )
+from .legacy_policy import adapt_legacy_policy
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -50,9 +51,11 @@ def main() -> None:
     config = load_config(args.config.expanduser().resolve())
     output.parent.mkdir(parents=True, exist_ok=True)
     active_rom = prepare_rom(source_rom, (1, 2, 3), output.parent)
-    model = PPO.load(model_path, device=args.device)
-    validate_model_observation_space(model, model_path)
-    validate_model_action_space(model, model_path)
+    loaded_model = PPO.load(model_path, device=args.device)
+    model = adapt_legacy_policy(loaded_model)
+    if model is loaded_model:
+        validate_model_observation_space(model, model_path)
+        validate_model_action_space(model, model_path)
     frame_skip = int(config["frame_skip"])
     env = make_ram_env(
         frame_skip=frame_skip,

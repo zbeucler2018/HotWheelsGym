@@ -12,6 +12,7 @@ from typing import Any
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv
+import torch
 from torch import nn
 
 from .callbacks import RAMEvalCallback
@@ -31,6 +32,12 @@ from .common import (
     validate_model_action_space,
     validate_model_observation_space,
     write_run_metadata,
+)
+from .legacy_policy import is_legacy_v6_policy
+
+V6_INPUT_LAYER_KEYS = (
+    "mlp_extractor.policy_net.0.weight",
+    "mlp_extractor.value_net.0.weight",
 )
 
 
@@ -147,6 +154,75 @@ def _resume_summary(model: PPO) -> str:
     )
 
 
+def _migrate_v6_policy_state(
+    source_state: dict[str, torch.Tensor],
+    target_state: dict[str, torch.Tensor],
+) -> dict[str, torch.Tensor]:
+    """Append zero-weight pickup inputs while preserving all v6 behavior."""
+
+    migrated: dict[str, torch.Tensor] = {}
+    expanded: set[str] = set()
+    for name, target in target_state.items():
+        if name not in source_state:
+            raise RuntimeError(f"v6 policy migration is missing tensor {name}")
+        source = source_state[name]
+        if source.shape == target.shape:
+            migrated[name] = source.detach().clone()
+            continue
+        if (
+            name in V6_INPUT_LAYER_KEYS
+            and source.ndim == 2
+            and target.ndim == 2
+            and source.shape[0] == target.shape[0]
+            and source.shape[1] < target.shape[1]
+        ):
+            value = torch.zeros_like(target)
+            value[:, : source.shape[1]] = source
+            migrated[name] = value
+            expanded.add(name)
+            continue
+        raise RuntimeError(
+            f"cannot migrate policy tensor {name}: {tuple(source.shape)} -> "
+            f"{tuple(target.shape)}"
+        )
+    if expanded != set(V6_INPUT_LAYER_KEYS):
+        raise RuntimeError(
+            "v6 policy migration did not expand both policy and value input layers"
+        )
+    return migrated
+
+
+def _migrate_v6_model(
+    source: PPO,
+    training_env: SubprocVecEnv,
+    *,
+    ppo: dict[str, Any],
+    policy_kwargs: dict[str, Any],
+    tensorboard_log: Path,
+    seed: int,
+    device: str,
+) -> PPO:
+    """Create a v7 PPO model whose initial policy is exactly the v6 source."""
+
+    model = PPO(
+        "MlpPolicy",
+        training_env,
+        policy_kwargs=policy_kwargs,
+        tensorboard_log=str(tensorboard_log),
+        verbose=1,
+        seed=seed,
+        device=device,
+        **ppo,
+    )
+    migrated = _migrate_v6_policy_state(
+        source.policy.state_dict(), model.policy.state_dict()
+    )
+    model.policy.load_state_dict(migrated, strict=True)
+    model.num_timesteps = source.num_timesteps
+    model._n_updates = source._n_updates
+    return model
+
+
 def main() -> None:
     args = _parser().parse_args()
     config_path = args.config.expanduser().resolve()
@@ -169,6 +245,14 @@ def main() -> None:
         config["opponent_league"] = dict(args.league_opponent)
     if args.opponent_state is not None:
         config["opponent_state"] = str(args.opponent_state.expanduser().resolve())
+    if args.resume_model is not None:
+        resume_path: Path | None = args.resume_model.expanduser().resolve()
+    elif config.get("resume_model"):
+        resume_path = resolve_repo_path(str(config["resume_model"])).resolve()
+    else:
+        resume_path = None
+    if resume_path is not None:
+        config["resume_model"] = str(resume_path)
     if int(config["total_timesteps"]) < 1:
         raise ValueError("timesteps must be at least one")
     if int(config["num_envs"]) < 1:
@@ -284,19 +368,34 @@ def main() -> None:
             if has_model_opponents
             else None
         )
-        if args.resume_model:
-            resume_path = args.resume_model.expanduser().resolve()
-            model = PPO.load(
-                resume_path,
-                env=training_env,
-                device=args.device,
-                tensorboard_log=str(run_dir / "tensorboard"),
-                # SB3 otherwise restores stale training hyperparameters
-                # from the checkpoint and silently ignores this run's YAML.
-                custom_objects=dict(ppo),
-            )
-            validate_model_observation_space(model, resume_path)
-            validate_model_action_space(model, resume_path)
+        if resume_path is not None:
+            source_model = PPO.load(resume_path, device=args.device)
+            validate_model_action_space(source_model, resume_path)
+            if is_legacy_v6_policy(source_model):
+                model = _migrate_v6_model(
+                    source_model,
+                    training_env,
+                    ppo=ppo,
+                    policy_kwargs=policy_kwargs,
+                    tensorboard_log=run_dir / "tensorboard",
+                    seed=int(config["seed"]),
+                    device=args.device,
+                )
+                print(
+                    "Migrated observation v6 -> v7 with zero-initialized pickup "
+                    "inputs; the starting policy is behavior-identical."
+                )
+            else:
+                model = PPO.load(
+                    resume_path,
+                    env=training_env,
+                    device=args.device,
+                    tensorboard_log=str(run_dir / "tensorboard"),
+                    # SB3 otherwise restores stale training hyperparameters
+                    # from the checkpoint and silently ignores this run's YAML.
+                    custom_objects=dict(ppo),
+                )
+                validate_model_observation_space(model, resume_path)
             _verify_resume_ppo_configuration(model, ppo)
             print(f"Applied resume PPO configuration: {_resume_summary(model)}")
         else:
@@ -352,7 +451,7 @@ def main() -> None:
                 total_timesteps=int(config["total_timesteps"]),
                 callback=CallbackList(callbacks),
                 tb_log_name="ppo",
-                reset_num_timesteps=not bool(args.resume_model),
+                reset_num_timesteps=resume_path is None,
                 progress_bar=False,
             )
         except KeyboardInterrupt:

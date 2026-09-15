@@ -7,12 +7,14 @@ from types import SimpleNamespace
 
 import gymnasium as gym
 import numpy as np
+import torch
 
 from HotWheelsGym.RAMOpponent import (
     _balanced_league_rotations,
     _is_white_respawn_frame,
     _newly_finished_slots,
 )
+from HotWheelsGym.ram_opponent_control import DINO_RAM_OBSERVATION_SIZE
 from training_scripts.ram_player.callbacks import (
     evaluate_ram_policy,
     evaluation_metric_names,
@@ -27,12 +29,18 @@ from training_scripts.ram_player.common import (
 from training_scripts.ram_player.media import RGBVideoWriter
 from training_scripts.ram_player.legacy_policy import (
     LEGACY_V5_ACTION_SIZE,
+    LEGACY_V6_OBSERVATION_SIZE,
     V6_ACTION_HISTORY_START,
     LegacyV5PolicyAdapter,
+    LegacyV6PolicyAdapter,
 )
 from training_scripts.ram_player.phase0_league_eval import _rotations
 from training_scripts.ram_player.sweep import checkpoint_sort_key
-from training_scripts.ram_player.train import _verify_resume_ppo_configuration
+from training_scripts.ram_player.train import (
+    V6_INPUT_LAYER_KEYS,
+    _migrate_v6_policy_state,
+    _verify_resume_ppo_configuration,
+)
 
 
 class RAMEvaluationToolTests(unittest.TestCase):
@@ -71,7 +79,9 @@ class RAMEvaluationToolTests(unittest.TestCase):
 
         model = FakeLegacyModel()
         policy = LegacyV5PolicyAdapter(model)
-        observation = np.linspace(-1.0, 1.0, 62, dtype=np.float32)
+        observation = np.linspace(
+            -1.0, 1.0, DINO_RAM_OBSERVATION_SIZE, dtype=np.float32
+        )
         action, _ = policy.predict(observation)
         policy.predict(observation)
 
@@ -87,6 +97,63 @@ class RAMEvaluationToolTests(unittest.TestCase):
         self.assertEqual(second_history.tolist(), [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])
         policy.reset()
         self.assertEqual(policy.previous_action, 0)
+
+    def test_legacy_v6_policy_adapter_ignores_only_pickup_radar_suffix(self):
+        class FakeLegacyModel:
+            observation_space = gym.spaces.Box(
+                -1.0, 1.0, (LEGACY_V6_OBSERVATION_SIZE,), np.float32
+            )
+            action_space = gym.spaces.MultiDiscrete((4, 3, 2))
+
+            def __init__(self):
+                self.observation = None
+
+            def predict(self, observation, *, deterministic=True):
+                self.observation = np.array(observation, copy=True)
+                return np.asarray((1, 2, 1)), None
+
+        model = FakeLegacyModel()
+        policy = LegacyV6PolicyAdapter(model)
+        observation = np.linspace(
+            -1.0, 1.0, DINO_RAM_OBSERVATION_SIZE, dtype=np.float32
+        )
+        action, _ = policy.predict(observation)
+
+        self.assertEqual(action.tolist(), [1, 2, 1])
+        self.assertEqual(model.observation.shape, (LEGACY_V6_OBSERVATION_SIZE,))
+        np.testing.assert_array_equal(
+            model.observation, observation[:LEGACY_V6_OBSERVATION_SIZE]
+        )
+
+    def test_v6_policy_state_migration_preserves_old_inputs_and_zeros_new_ones(self):
+        old_width = LEGACY_V6_OBSERVATION_SIZE
+        new_width = DINO_RAM_OBSERVATION_SIZE
+        source = {
+            V6_INPUT_LAYER_KEYS[0]: torch.arange(
+                2 * old_width, dtype=torch.float32
+            ).reshape(2, old_width),
+            V6_INPUT_LAYER_KEYS[1]: torch.arange(
+                3 * old_width, dtype=torch.float32
+            ).reshape(3, old_width),
+            "action_net.bias": torch.tensor([1.0, 2.0]),
+        }
+        target = {
+            V6_INPUT_LAYER_KEYS[0]: torch.empty((2, new_width)),
+            V6_INPUT_LAYER_KEYS[1]: torch.empty((3, new_width)),
+            "action_net.bias": torch.empty(2),
+        }
+
+        migrated = _migrate_v6_policy_state(source, target)
+
+        for name in V6_INPUT_LAYER_KEYS:
+            torch.testing.assert_close(migrated[name][:, :old_width], source[name])
+            torch.testing.assert_close(
+                migrated[name][:, old_width:],
+                torch.zeros_like(migrated[name][:, old_width:]),
+            )
+        torch.testing.assert_close(
+            migrated["action_net.bias"], source["action_net.bias"]
+        )
 
     def test_phase0_rotations_put_each_model_in_each_slot(self):
         models = [("v5", Path("five")), ("v6", Path("six")), ("v8", Path("eight"))]
@@ -178,6 +245,18 @@ class RAMEvaluationToolTests(unittest.TestCase):
             int(fast["ppo"]["n_steps"]) * int(fast["frame_skip"]),
         )
 
+    def test_v10_config_is_a_bounded_lossless_v9_fine_tune(self):
+        root = Path(__file__).resolve().parents[1] / "training_scripts" / "ram_player"
+        config = load_config(root / "dino_boneyard_power_up_radar_v10.yml")
+
+        self.assertEqual(config["total_timesteps"], 750_000)
+        self.assertEqual(config["num_envs"], 3)
+        self.assertIn("self_play_v9", config["resume_model"])
+        self.assertEqual(config["reward"]["jet_boost_pickup_bonus"], 8.0)
+        self.assertEqual(config["reward"]["power_up_approach_scale"], 2.0)
+        self.assertFalse(config["opponents"])
+        self.assertFalse(config["opponent_league"])
+
     def test_evaluation_aggregates_track_quality_metrics(self):
         class OneStepEnv(gym.Env):
             observation_space = gym.spaces.Box(-1.0, 1.0, (60,), np.float32)
@@ -210,6 +289,10 @@ class RAMEvaluationToolTests(unittest.TestCase):
                         "ram_decision_jet_boost_frames": 2,
                         "ram_decision_jet_boost_pickups": 1,
                         "ram_decision_skid_frames": 3,
+                        "ram_player_jet_boost_approach_frames": 8,
+                        "ram_player_jet_boost_approach_available_frames": 6,
+                        "ram_player_jet_boost_approach_abs_lateral_error_total": 2.0,
+                        "ram_player_power_up_approach_reward_total": 1.5,
                         "ram_player_hairpin_entries": 3,
                         "ram_player_hairpin_completed": 3,
                         "ram_player_hairpin_jet_boost_entries": 2,
@@ -267,6 +350,9 @@ class RAMEvaluationToolTests(unittest.TestCase):
         self.assertEqual(result.jet_boost_active_rate, 0.5)
         self.assertEqual(result.mean_jet_boost_pickups, 1.0)
         self.assertEqual(result.skid_active_rate, 0.75)
+        self.assertEqual(result.mean_jet_boost_approach_abs_lateral_error, 0.25)
+        self.assertEqual(result.jet_boost_approach_availability_rate, 0.75)
+        self.assertEqual(result.mean_power_up_approach_reward, 1.5)
         self.assertEqual(result.mean_hairpin_completions, 3.0)
         self.assertAlmostEqual(result.mean_hairpin_seconds, 2 / 3)
         self.assertEqual(result.mean_hairpin_entry_speed, 50_000)

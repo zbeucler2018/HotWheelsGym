@@ -13,10 +13,13 @@ from operator import index as integer_index
 from typing import Mapping
 
 from .dino_boneyard_track import (
+    DINO_POWER_UP_OBSERVATION_NAMES,
+    DINO_POWER_UP_OBSERVATION_SIZE,
     DinoTrackPose,
     DINO_TRACK_OBSERVATION_NAMES,
     DINO_TRACK_OBSERVATION_SIZE,
     DINO_TRACK_POINT_COUNT,
+    dino_next_power_up_radar,
     dino_track_pose,
 )
 from .npc_control import (
@@ -26,6 +29,7 @@ from .npc_control import (
     RACER_HELD_OFFSET,
     RACER_PRESSED_OFFSET,
     RACER_RELEASED_OFFSET,
+    PowerUpState,
     RaceMemory,
     RacerState,
     heading_delta,
@@ -35,7 +39,7 @@ from .npc_control import (
 DINO_BONEYARD_PROGRESS_COUNT = 342
 DINO_HAIRPIN_START_PROGRESS = 45
 DINO_HAIRPIN_END_PROGRESS = 61
-DINO_RAM_OBSERVATION_VERSION = 6
+DINO_RAM_OBSERVATION_VERSION = 7
 DINO_SECTOR_BOUNDARIES = (0, 32, 45, 61, 92, 124, 156, 188, 220, 252, 284, 316, 342)
 DINO_SECTOR_COUNT = len(DINO_SECTOR_BOUNDARIES) - 1
 DINO_POSITION_CENTER = 1 << 24
@@ -114,6 +118,7 @@ class RaceRewardConfig:
     relative_progress_scale: float = 0.0
     win_bonus: float = 0.0
     opponent_finish_penalty: float = 0.0
+    power_up_approach_scale: float = 0.0
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, object] | None) -> "RaceRewardConfig":
@@ -136,6 +141,7 @@ class RaceRewardConfig:
             relative_progress_scale=float(raw.get("relative_progress_scale", 0.0)),
             win_bonus=float(raw.get("win_bonus", 0.0)),
             opponent_finish_penalty=float(raw.get("opponent_finish_penalty", 0.0)),
+            power_up_approach_scale=float(raw.get("power_up_approach_scale", 0.0)),
         )
         if config.mode not in {"legacy", "time_trial"}:
             raise ValueError("RAM reward mode must be 'legacy' or 'time_trial'")
@@ -152,6 +158,7 @@ class RaceRewardConfig:
             "relative_progress_scale",
             "win_bonus",
             "opponent_finish_penalty",
+            "power_up_approach_scale",
         )
         if any(getattr(config, name) < 0 for name in nonnegative):
             raise ValueError("RAM reward weights must be nonnegative")
@@ -431,17 +438,21 @@ OTHER_OBSERVATION_NAMES = (
     "relative_lap",
 )
 
-RAM_OBSERVATION_NAMES = SELF_OBSERVATION_NAMES + tuple(
+RAM_BASE_OBSERVATION_NAMES = SELF_OBSERVATION_NAMES + tuple(
     f"nearby_racer_{position}_{name}"
     for position in (1, 2, 3)
     for name in OTHER_OBSERVATION_NAMES
 )
+RAM_OBSERVATION_NAMES = RAM_BASE_OBSERVATION_NAMES + DINO_POWER_UP_OBSERVATION_NAMES
 
 SELF_OBSERVATION_SIZE = (
     15 + DINO_TRACK_OBSERVATION_SIZE + sum(RAM_ACTION_COMPONENT_SIZES)
 )
 OTHER_OBSERVATION_SIZE = 9
-DINO_RAM_OBSERVATION_SIZE = SELF_OBSERVATION_SIZE + 3 * OTHER_OBSERVATION_SIZE
+DINO_RAM_BASE_OBSERVATION_SIZE = SELF_OBSERVATION_SIZE + 3 * OTHER_OBSERVATION_SIZE
+DINO_RAM_OBSERVATION_SIZE = (
+    DINO_RAM_BASE_OBSERVATION_SIZE + DINO_POWER_UP_OBSERVATION_SIZE
+)
 
 if len(RAM_OBSERVATION_NAMES) != DINO_RAM_OBSERVATION_SIZE:
     raise RuntimeError("RAM observation name and value counts differ")
@@ -682,6 +693,7 @@ def build_dino_ram_observation(
     *,
     total_laps: int = 3,
     track_pose: DinoTrackPose | None = None,
+    power_ups: tuple[PowerUpState, ...] | None = None,
 ) -> tuple[float, ...]:
     """Build the same Dino racer-centric observation for any racer slot."""
 
@@ -760,6 +772,8 @@ def build_dino_ram_observation(
             )
         )
 
+    features.extend(dino_next_power_up_radar(track, power_ups).features)
+
     if len(features) != DINO_RAM_OBSERVATION_SIZE:
         raise RuntimeError(
             f"RAM observation has {len(features)} values, "
@@ -814,6 +828,7 @@ def time_trial_race_reward(
     relative_progress_delta: float = 0.0,
     won_now: bool = False,
     opponents_finished_now: int = 0,
+    power_up_approach_delta: float = 0.0,
     config: RaceRewardConfig | None = None,
 ) -> float:
     """Reward useful forward progress while making elapsed frames expensive."""
@@ -835,4 +850,5 @@ def time_trial_race_reward(
         + weights.relative_progress_scale * relative_progress_delta
         + (weights.win_bonus if won_now else 0.0)
         - weights.opponent_finish_penalty * opponents_finished_now
+        + weights.power_up_approach_scale * power_up_approach_delta
     )

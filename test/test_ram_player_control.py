@@ -29,6 +29,7 @@ def load_module(name: str, filename: str):
 npc = load_module("npc_control", "npc_control.py")
 ram = load_module("ram_opponent_control", "ram_opponent_control.py")
 track = sys.modules[f"{PACKAGE_NAME}.dino_boneyard_track"]
+wrappers = load_module("RAMOpponent", "RAMOpponent.py")
 
 
 class FakeMemory:
@@ -76,7 +77,7 @@ class RAMPlayerControlTests(unittest.TestCase):
                     states, states, tracker, slot, ram.RAM_DEFAULT_ACTION
                 )
                 self.assertEqual(len(observation), ram.DINO_RAM_OBSERVATION_SIZE)
-                self.assertEqual(ram.DINO_RAM_OBSERVATION_SIZE, 62)
+                self.assertEqual(ram.DINO_RAM_OBSERVATION_SIZE, 67)
                 self.assertEqual(len(observation), len(ram.RAM_OBSERVATION_NAMES))
                 self.assertTrue(all(-1.0 <= value <= 1.0 for value in observation))
 
@@ -122,7 +123,131 @@ class RAMPlayerControlTests(unittest.TestCase):
             "track_curvature_long",
         }
         self.assertTrue(expected.issubset(set(ram.RAM_OBSERVATION_NAMES)))
-        self.assertEqual(ram.DINO_RAM_OBSERVATION_VERSION, 6)
+        self.assertEqual(ram.DINO_RAM_OBSERVATION_VERSION, 7)
+
+    def test_dino_power_up_map_contains_two_jet_boosts_and_five_refills(self):
+        placements = track.DINO_BONEYARD_POWER_UPS
+
+        self.assertEqual(len(placements), 7)
+        self.assertEqual(
+            sum(
+                pickup.kind == track.DINO_POWER_UP_JET_BOOST_TYPE
+                for pickup in placements
+            ),
+            2,
+        )
+        self.assertEqual(
+            sum(
+                pickup.kind == track.DINO_POWER_UP_BOOST_REFILL_TYPE
+                for pickup in placements
+            ),
+            5,
+        )
+        self.assertEqual(
+            [pickup.progress for pickup in placements],
+            sorted(pickup.progress for pickup in placements),
+        )
+        hairpin_pickup = next(
+            pickup
+            for pickup in placements
+            if pickup.kind == track.DINO_POWER_UP_JET_BOOST_TYPE
+        )
+        self.assertAlmostEqual(hairpin_pickup.progress, 42.971, places=3)
+        self.assertAlmostEqual(hairpin_pickup.lateral_offset, -0.1889, places=4)
+
+    def test_power_up_radar_is_symmetric_and_tracks_global_availability(self):
+        memory = state_memory(self.state_path)
+        race = npc.RaceMemory(memory)
+        x, z = track.DINO_BONEYARD_CENTERLINE[32]
+        states = {
+            slot: replace(state, progress=32, x=x, z=z)
+            for slot, state in ram.read_racer_states(race).items()
+        }
+        tracker = ram.RaceProgressTracker.from_states(
+            states, ram.DINO_BONEYARD_PROGRESS_COUNT
+        )
+        hairpin_pickup = next(
+            pickup
+            for pickup in track.DINO_BONEYARD_POWER_UPS
+            if pickup.kind == track.DINO_POWER_UP_JET_BOOST_TYPE
+        )
+        power_ups = tuple(
+            npc.PowerUpState(
+                address=index,
+                state=2 if pickup == hairpin_pickup else 0,
+                kind=pickup.kind,
+                respawn_timer=0,
+                x=pickup.x,
+                y=pickup.y,
+                z=pickup.z,
+            )
+            for index, pickup in enumerate(track.DINO_BONEYARD_POWER_UPS)
+        )
+
+        available_index = ram.RAM_OBSERVATION_NAMES.index("next_power_up_available")
+        type_index = ram.RAM_OBSERVATION_NAMES.index("next_power_up_is_jet_boost")
+        distance_index = ram.RAM_OBSERVATION_NAMES.index(
+            "next_power_up_progress_distance"
+        )
+        radar_values = []
+        for slot in states:
+            observation = ram.build_dino_ram_observation(
+                states,
+                states,
+                tracker,
+                slot,
+                ram.RAM_DEFAULT_ACTION,
+                power_ups=power_ups,
+            )
+            radar_values.append(observation[-track.DINO_POWER_UP_OBSERVATION_SIZE :])
+            self.assertEqual(observation[available_index], 0.0)
+            self.assertEqual(observation[type_index], 1.0)
+            self.assertGreater(observation[distance_index], 0.0)
+        self.assertTrue(all(values == radar_values[0] for values in radar_values[1:]))
+
+    def test_pickup_discovery_tolerates_only_incomplete_start_line_construction(self):
+        incomplete = FakeMemory(bytes(npc.EWRAM_SIZE))
+        address = npc.EWRAM_BASE + 0x100
+        incomplete.assign(address, "<u4", npc.POWER_UP_VTABLE)
+        incomplete.assign(address + npc.POWER_UP_STATE_OFFSET, "|u1", 0)
+        incomplete.assign(address + npc.POWER_UP_TYPE_OFFSET, "|u1", 6)
+        incomplete.assign(address + npc.POWER_UP_X_OFFSET, "<u4", 1_000)
+        incomplete.assign(address + npc.POWER_UP_Z_OFFSET, "<u4", 2_000)
+        addresses, power_ups = wrappers._read_or_discover_dino_power_ups(incomplete)
+        self.assertEqual(addresses, ())
+        self.assertIsNone(power_ups)
+
+        addresses, power_ups = wrappers._read_or_discover_dino_power_ups(
+            state_memory(self.state_path)
+        )
+        self.assertEqual(len(addresses), 7)
+        self.assertIsNotNone(power_ups)
+        self.assertEqual(len(power_ups), 7)
+
+    def test_jet_boost_approach_potential_rewards_alignment_and_is_bounded(self):
+        pickup = next(
+            pickup
+            for pickup in track.DINO_BONEYARD_POWER_UPS
+            if pickup.kind == track.DINO_POWER_UP_JET_BOOST_TYPE
+        )
+        base = track.DinoPowerUpRadar(
+            placement=pickup,
+            progress_distance=12.0,
+            lateral_error=0.0,
+            available=True,
+        )
+        aligned = track.dino_jet_boost_approach_potential(base)
+        misaligned = track.dino_jet_boost_approach_potential(
+            replace(base, lateral_error=0.4)
+        )
+
+        self.assertGreater(aligned, misaligned)
+        self.assertGreaterEqual(misaligned, 0.0)
+        self.assertLessEqual(aligned, 1.0)
+        self.assertEqual(
+            track.dino_jet_boost_approach_potential(replace(base, available=False)),
+            0.0,
+        )
 
     def test_native_skid_state_is_symmetric_for_player_and_opponents(self):
         memory = state_memory(self.state_path)
@@ -582,6 +707,24 @@ class RAMPlayerControlTests(unittest.TestCase):
         )
 
         self.assertAlmostEqual(pickup - ordinary, 8.0)
+
+    def test_time_trial_power_up_approach_shaping_uses_bounded_delta(self):
+        config = ram.RaceRewardConfig.from_mapping(
+            {"mode": "time_trial", "power_up_approach_scale": 2.0}
+        )
+        parameters = {
+            "previous_rank": 2,
+            "current_rank": 2,
+            "config": config,
+        }
+        ordinary = ram.time_trial_race_reward(0.25, **parameters)
+        approached = ram.time_trial_race_reward(
+            0.25,
+            power_up_approach_delta=0.3,
+            **parameters,
+        )
+
+        self.assertAlmostEqual(approached - ordinary, 0.6)
 
     def test_time_trial_competitive_terms_reward_gaining_and_winning(self):
         config = ram.RaceRewardConfig.from_mapping(

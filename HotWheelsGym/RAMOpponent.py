@@ -11,18 +11,26 @@ import gymnasium as gym
 import numpy as np
 
 from .dino_boneyard_track import (
+    DINO_BONEYARD_POWER_UPS,
+    DINO_JET_BOOST_APPROACH_PROGRESS,
+    DinoPowerUpRadar,
     DinoTrackPose,
     dino_continuous_progress_delta,
+    dino_jet_boost_approach_potential,
+    dino_next_power_up_radar,
     dino_track_pose,
 )
 from .enums import RaceMode, Tracks
 from .npc_control import (
     MAX_BOOST_CHARGE,
     MAX_JET_BOOST_TIMER,
+    PowerUpState,
     RaceMemory,
     RacerState,
     button_controlled_vehicle_indices_from_rom,
+    discover_power_up_addresses,
     progress_delta,
+    read_power_up_states,
 )
 from .ram_opponent_control import (
     DINO_BONEYARD_PROGRESS_COUNT,
@@ -164,6 +172,47 @@ def _lap_split_info(prefix: str, timing: LapSplitTracker) -> dict[str, int]:
     }
 
 
+def _power_up_radar_info(prefix: str, radar: DinoPowerUpRadar) -> dict[str, Any]:
+    placement = radar.placement
+    return {
+        f"{prefix}next_power_up_type": placement.kind,
+        f"{prefix}next_power_up_x": placement.x,
+        f"{prefix}next_power_up_y": placement.y,
+        f"{prefix}next_power_up_z": placement.z,
+        f"{prefix}next_power_up_progress": placement.progress,
+        f"{prefix}next_power_up_progress_distance": radar.progress_distance,
+        f"{prefix}next_power_up_target_lateral": placement.lateral_offset,
+        f"{prefix}next_power_up_lateral_error": radar.lateral_error,
+        f"{prefix}next_power_up_available": radar.available,
+        f"{prefix}next_power_up_is_jet_boost": radar.is_jet_boost,
+    }
+
+
+def _read_or_discover_dino_power_ups(
+    memory: Any,
+    addresses: tuple[int, ...] = (),
+) -> tuple[tuple[int, ...], tuple[PowerUpState, ...] | None]:
+    """Read all pickups, tolerating only the start-line construction warmup."""
+
+    if not addresses:
+        try:
+            discovered = discover_power_up_addresses(memory)
+        except RuntimeError:
+            return (), None
+        if len(discovered) < len(DINO_BONEYARD_POWER_UPS):
+            return (), None
+        addresses = discovered
+    power_ups = read_power_up_states(memory, addresses)
+    expected = {(pickup.kind, pickup.x, pickup.z) for pickup in DINO_BONEYARD_POWER_UPS}
+    actual = {(pickup.kind, pickup.x, pickup.z) for pickup in power_ups}
+    missing = expected - actual
+    if missing:
+        raise RuntimeError(
+            f"Dino power-up layout is missing {len(missing)} expected object(s)"
+        )
+    return addresses, power_ups
+
+
 def _hairpin_info(telemetry: DinoHairpinTelemetry) -> dict[str, Any]:
     info = {
         "ram_player_hairpin_entries": telemetry.entries,
@@ -253,6 +302,12 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         self._hairpin = DinoHairpinTelemetry()
         self._sectors: DinoSectorTelemetry | None = None
         self._track_pose: DinoTrackPose | None = None
+        self._power_up_addresses: tuple[int, ...] = ()
+        self._power_ups: tuple[PowerUpState, ...] | None = None
+        self._jet_boost_approach_frames = 0
+        self._jet_boost_approach_available_frames = 0
+        self._jet_boost_approach_abs_lateral_error_total = 0.0
+        self._power_up_approach_reward_total = 0.0
         self._reward_config = RaceRewardConfig.from_mapping(reward_config)
         self.action_space = gym.spaces.MultiDiscrete(
             np.asarray(RAM_ACTION_COMPONENT_SIZES, dtype=np.int64)
@@ -282,6 +337,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
                 self._previous_action,
                 total_laps=int(_bare_env(self.env).total_laps),
                 track_pose=self._track_pose,
+                power_ups=self._power_ups,
             ),
             dtype=np.float32,
         )
@@ -289,6 +345,9 @@ class DinoRAMPlayerEnv(gym.Wrapper):
     def reset(self, **kwargs: Any) -> tuple[np.ndarray, dict[str, Any]]:
         _, info = self.env.reset(**kwargs)
         self._race = RaceMemory(_bare_env(self.env).data.memory)
+        self._power_up_addresses, self._power_ups = _read_or_discover_dino_power_ups(
+            _bare_env(self.env).data.memory
+        )
         self._states = read_racer_states(self._race)
         self._previous_states = dict(self._states)
         self._progress = RaceProgressTracker.from_states(
@@ -310,6 +369,11 @@ class DinoRAMPlayerEnv(gym.Wrapper):
             self._states[0], self.progress_tracker.current_lap(0, self._states[0])
         )
         self._track_pose = dino_track_pose(self._states[0])
+        radar = dino_next_power_up_radar(self._track_pose, self._power_ups)
+        self._jet_boost_approach_frames = 0
+        self._jet_boost_approach_available_frames = 0
+        self._jet_boost_approach_abs_lateral_error_total = 0.0
+        self._power_up_approach_reward_total = 0.0
         info.update(
             _state_info(
                 "ram_player_",
@@ -324,6 +388,11 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         info.update(_lap_split_info("ram_player_", self._lap_timing))
         info.update(_hairpin_info(self._hairpin))
         info.update(_sector_info(self._sectors))
+        info.update(_power_up_radar_info("ram_player_", radar))
+        info["ram_player_jet_boost_approach_frames"] = 0
+        info["ram_player_jet_boost_approach_available_frames"] = 0
+        info["ram_player_jet_boost_approach_abs_lateral_error_total"] = 0.0
+        info["ram_player_power_up_approach_reward_total"] = 0.0
         track = self._track_pose
         info["ram_player_track_index"] = track.progress_index
         info["ram_player_lateral_offset"] = track.lateral_offset
@@ -345,6 +414,8 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         previous_states = self._states
         previous = previous_states[0]
         previous_track = self._track_pose
+        previous_power_ups = self._power_ups
+        previous_radar = dino_next_power_up_radar(previous_track, previous_power_ups)
         previous_rank = self.progress_tracker.rank(0, previous_states)
         previous_lap = self.progress_tracker.current_lap(0, previous)
         previous_best_opponent_progress = max(
@@ -359,6 +430,9 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         self._raw_frame += 1
 
         current_states = read_racer_states(self._race)
+        self._power_up_addresses, current_power_ups = _read_or_discover_dino_power_ups(
+            self._race.memory, self._power_up_addresses
+        )
         self.progress_tracker.update(current_states)
         current = current_states[0]
         current_rank = self.progress_tracker.rank(0, current_states)
@@ -397,6 +471,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         )
         info.update(_lap_split_info("ram_player_", self._lap_timing))
         track = dino_track_pose(current)
+        radar = dino_next_power_up_radar(track, current_power_ups)
         continuous_advance = dino_continuous_progress_delta(
             previous_track,
             track,
@@ -410,6 +485,32 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         hit_wall = bool(info.get("hit_wall", False))
         boost = boost_telemetry(previous.boost, current.boost, action_components)
         jet_boost_acquired = current.jet_boost_remaining > previous.jet_boost_remaining
+        previous_approach = dino_jet_boost_approach_potential(previous_radar)
+        current_approach = dino_jet_boost_approach_potential(radar)
+        if jet_boost_acquired and previous_radar.is_jet_boost:
+            power_up_approach_delta = max(0.0, 1.0 - previous_approach)
+        elif (
+            previous_radar.placement == radar.placement
+            and previous_radar.available
+            and radar.available
+        ):
+            power_up_approach_delta = current_approach - previous_approach
+        elif previous_radar.available and previous_radar.placement != radar.placement:
+            # Crossing the pickup without collecting it pays back any accumulated
+            # approach potential, keeping the shaping bounded over a full lap.
+            power_up_approach_delta = -previous_approach
+        else:
+            power_up_approach_delta = 0.0
+        if (
+            radar.is_jet_boost
+            and radar.progress_distance <= DINO_JET_BOOST_APPROACH_PROGRESS
+        ):
+            self._jet_boost_approach_frames += 1
+            self._jet_boost_approach_available_frames += int(radar.available)
+            self._jet_boost_approach_abs_lateral_error_total += abs(radar.lateral_error)
+        self._power_up_approach_reward_total += (
+            self._reward_config.power_up_approach_scale * power_up_approach_delta
+        )
         self._jet_boost_pickups += int(jet_boost_acquired)
         self._hairpin.update(
             previous,
@@ -446,6 +547,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
                 relative_progress_delta=relative_progress_delta,
                 won_now=finished_now and current_rank == 1,
                 opponents_finished_now=opponents_finished_now,
+                power_up_approach_delta=power_up_approach_delta,
                 config=self._reward_config,
                 **reward_arguments,
             )
@@ -459,6 +561,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         self._previous_states = previous_states
         self._states = current_states
         self._track_pose = track
+        self._power_ups = current_power_ups
         self._previous_action = action_components
         self._player_respawn_pending = player_respawn_pending
         info.update(
@@ -493,6 +596,18 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         info["ram_player_boost_active"] = boost.active
         info["ram_player_jet_boost_acquired"] = jet_boost_acquired
         info["ram_player_jet_boost_pickups"] = self._jet_boost_pickups
+        info.update(_power_up_radar_info("ram_player_", radar))
+        info["ram_player_power_up_approach_delta"] = power_up_approach_delta
+        info["ram_player_jet_boost_approach_frames"] = self._jet_boost_approach_frames
+        info["ram_player_jet_boost_approach_available_frames"] = (
+            self._jet_boost_approach_available_frames
+        )
+        info["ram_player_jet_boost_approach_abs_lateral_error_total"] = (
+            self._jet_boost_approach_abs_lateral_error_total
+        )
+        info["ram_player_power_up_approach_reward_total"] = (
+            self._power_up_approach_reward_total
+        )
         info.update(_hairpin_info(self._hairpin))
         return self._observation(), reward, terminated, truncated, info
 
@@ -632,6 +747,8 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         self._render_override: np.ndarray | None = None
         self._masking_opponent_respawn = False
         self._masked_respawn_frames = 0
+        self._power_up_addresses: tuple[int, ...] = ()
+        self._power_ups: tuple[PowerUpState, ...] | None = None
 
     def _assign_league(self, seed: int | None) -> None:
         if not self._league:
@@ -668,6 +785,7 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
                 slot,
                 self._actions[slot],
                 total_laps=int(_bare_env(self.env).total_laps),
+                power_ups=self._power_ups,
             ),
             dtype=np.float32,
         )
@@ -676,6 +794,9 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         self._assign_league(kwargs.get("seed"))
         observation, info = self.env.reset(**kwargs)
         self._race = RaceMemory(_bare_env(self.env).data.memory)
+        self._power_up_addresses, self._power_ups = _read_or_discover_dino_power_ups(
+            _bare_env(self.env).data.memory
+        )
         slots = self._slots
         _validate_slots(self.env, self._race, slots)
         self._states = read_racer_states(self._race)
@@ -731,6 +852,10 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
             info[f"ram_npc_{slot}_jet_boost_acquired"] = False
             info[f"ram_npc_{slot}_jet_boost_pickups"] = 0
             info[f"ram_npc_{slot}_policy_label"] = self._opponent_labels[slot]
+            radar = dino_next_power_up_radar(
+                dino_track_pose(self._states[slot]), self._power_ups
+            )
+            info.update(_power_up_radar_info(f"ram_npc_{slot}_", radar))
         return observation, info
 
     def step(self, player_action: Any) -> tuple[Any, float, bool, bool, dict[str, Any]]:
@@ -764,6 +889,9 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         self._raw_frame += 1
         previous_states = self._states
         current_states = read_racer_states(self._race)
+        self._power_up_addresses, self._power_ups = _read_or_discover_dino_power_ups(
+            self._race.memory, self._power_up_addresses
+        )
         assert self._progress is not None
         self._progress.update(current_states)
         self._previous_states = previous_states
@@ -851,6 +979,12 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
             self._jet_boost_pickups[slot] += int(jet_boost_acquired)
             info[f"{prefix}jet_boost_acquired"] = jet_boost_acquired
             info[f"{prefix}jet_boost_pickups"] = self._jet_boost_pickups[slot]
+            info.update(
+                _power_up_radar_info(
+                    prefix,
+                    dino_next_power_up_radar(track, self._power_ups),
+                )
+            )
             info[f"{prefix}buttons_pressed"] = buttons.pressed
             info[f"{prefix}buttons_released"] = buttons.released
             info[f"{prefix}buttons_held"] = buttons.held

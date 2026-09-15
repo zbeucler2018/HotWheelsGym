@@ -77,6 +77,9 @@ class RAMEvaluation:
     jet_boost_active_rate: float
     mean_jet_boost_pickups: float
     skid_active_rate: float
+    mean_jet_boost_approach_abs_lateral_error: float
+    jet_boost_approach_availability_rate: float
+    mean_power_up_approach_reward: float
     mean_hairpin_completions: float
     mean_hairpin_seconds: float
     mean_hairpin_entry_speed: float
@@ -258,6 +261,9 @@ def evaluate_ram_policy(
     jet_boost_active_rates: list[float] = []
     jet_boost_pickup_counts: list[float] = []
     skid_active_rates: list[float] = []
+    jet_boost_approach_lateral_errors: list[float] = []
+    jet_boost_approach_availability_rates: list[float] = []
+    power_up_approach_rewards: list[float] = []
     hairpin_completions: list[float] = []
     hairpin_entries = 0
     hairpin_completed = 0
@@ -282,6 +288,9 @@ def evaluate_ram_policy(
     hairpin_condition_frames = dict.fromkeys(HAIRPIN_ACTION_GROUPS, 0.0)
 
     for _ in range(episodes):
+        reset_policy = getattr(model, "reset", None)
+        if callable(reset_policy):
+            reset_policy()
         observation, _ = env.reset()
         terminated = truncated = False
         episode_reward = 0.0
@@ -369,6 +378,20 @@ def evaluate_ram_policy(
         jet_boost_active_rates.append(jet_boost_frames / max(1, observed_frames))
         jet_boost_pickup_counts.append(float(jet_boost_pickups))
         skid_active_rates.append(skid_frames / max(1, observed_frames))
+        approach_frames = int(info.get("ram_player_jet_boost_approach_frames", 0))
+        jet_boost_approach_lateral_errors.append(
+            float(
+                info.get("ram_player_jet_boost_approach_abs_lateral_error_total", 0.0)
+            )
+            / max(1, approach_frames)
+        )
+        jet_boost_approach_availability_rates.append(
+            float(info.get("ram_player_jet_boost_approach_available_frames", 0))
+            / max(1, approach_frames)
+        )
+        power_up_approach_rewards.append(
+            float(info.get("ram_player_power_up_approach_reward_total", 0.0))
+        )
         episode_hairpin_completed = int(info.get("ram_player_hairpin_completed", 0))
         hairpin_completions.append(float(episode_hairpin_completed))
         hairpin_entries += int(info.get("ram_player_hairpin_entries", 0))
@@ -439,6 +462,13 @@ def evaluate_ram_policy(
         jet_boost_active_rate=fmean(jet_boost_active_rates),
         mean_jet_boost_pickups=fmean(jet_boost_pickup_counts),
         skid_active_rate=fmean(skid_active_rates),
+        mean_jet_boost_approach_abs_lateral_error=fmean(
+            jet_boost_approach_lateral_errors
+        ),
+        jet_boost_approach_availability_rate=fmean(
+            jet_boost_approach_availability_rates
+        ),
+        mean_power_up_approach_reward=fmean(power_up_approach_rewards),
         mean_hairpin_completions=fmean(hairpin_completions),
         mean_hairpin_seconds=(
             hairpin_completed_frames / max(1, hairpin_completed) / 60.0

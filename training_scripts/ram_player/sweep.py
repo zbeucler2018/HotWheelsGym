@@ -23,6 +23,7 @@ from .common import (
     validate_model_observation_space,
 )
 from .record import record_model
+from .legacy_policy import adapt_legacy_policy
 
 CHECKPOINT_PATTERN = re.compile(r"dino_ram_player_(\d+)_steps\.zip$")
 
@@ -145,9 +146,11 @@ def main() -> None:
     )
     try:
         for steps, label, model_path in candidates:
-            model = PPO.load(model_path, device=args.device)
-            validate_model_observation_space(model, model_path)
-            validate_model_action_space(model, model_path)
+            loaded_model = PPO.load(model_path, device=args.device)
+            model = adapt_legacy_policy(loaded_model)
+            if model is loaded_model:
+                validate_model_observation_space(model, model_path)
+                validate_model_action_space(model, model_path)
             result = evaluate_ram_policy(
                 model,
                 env,

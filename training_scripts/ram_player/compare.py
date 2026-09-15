@@ -35,6 +35,7 @@ from .common import (
     validate_model_observation_space,
 )
 from .media import RGBVideoWriter
+from .legacy_policy import adapt_legacy_policy
 from .record import record_model
 
 DEFAULT_PIXEL_MODEL = resolve_repo_path("zoo/dbm_basic/best_model.zip")
@@ -122,12 +123,17 @@ def _evaluate_ram(
         seed=int(config["seed"]) + 20_000,
         reward_config=config.get("reward"),
     )
-    model = PPO.load(model_path, device=device)
-    validate_model_observation_space(model, model_path)
-    validate_model_action_space(model, model_path)
+    loaded_model = PPO.load(model_path, device=device)
+    model = adapt_legacy_policy(loaded_model)
+    if model is loaded_model:
+        validate_model_observation_space(model, model_path)
+        validate_model_action_space(model, model_path)
     rows: list[dict[str, Any]] = []
     try:
         for episode in range(episodes):
+            reset_policy = getattr(model, "reset", None)
+            if callable(reset_policy):
+                reset_policy()
             observation, _ = env.reset(seed=int(config["seed"]) + episode)
             terminated = truncated = False
             reward_sum = 0.0

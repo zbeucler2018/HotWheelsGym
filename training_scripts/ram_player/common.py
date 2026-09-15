@@ -20,6 +20,7 @@ from stable_baselines3.common.monitor import Monitor
 
 import HotWheelsGym
 from HotWheelsGym import DinoRAMModelOpponentEnv, DinoRAMPlayerEnv, RAMActionRepeat
+from HotWheelsGym.dino_boneyard_track import DINO_BONEYARD_POWER_UPS
 from HotWheelsGym.npc_control import button_controlled_vehicle_indices_from_rom
 from HotWheelsGym.ram_opponent_control import (
     DINO_RAM_OBSERVATION_SIZE,
@@ -30,7 +31,12 @@ from HotWheelsGym.ram_opponent_control import (
     RAM_OBSERVATION_NAMES,
 )
 
-from .legacy_policy import LegacyV5PolicyAdapter, is_legacy_v5_policy
+from .legacy_policy import (
+    LegacyV5PolicyAdapter,
+    LegacyV6PolicyAdapter,
+    is_legacy_v5_policy,
+    is_legacy_v6_policy,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = Path(__file__).with_name("dino_boneyard.yml")
@@ -49,6 +55,10 @@ MONITOR_INFO_KEYS = (
     "ram_player_power_up_type",
     "ram_player_jet_boost_remaining",
     "ram_player_jet_boost_pickups",
+    "ram_player_jet_boost_approach_frames",
+    "ram_player_jet_boost_approach_available_frames",
+    "ram_player_jet_boost_approach_abs_lateral_error_total",
+    "ram_player_power_up_approach_reward_total",
     "ram_player_skid_active",
     "ram_player_hairpin_entries",
     "ram_player_hairpin_completed",
@@ -221,6 +231,12 @@ def validate_model_observation_space(model: Any, path: str | Path) -> None:
                 "steering, and boost so the policy can steer while boosting, and "
                 "encodes those action components in the observation. Train v6 "
                 "from scratch."
+            )
+        elif shape == (62,):
+            legacy_note = (
+                " This is an observation-v6 checkpoint; v7 appends five live "
+                "pickup-radar values. It can be evaluated through the v6 prefix "
+                "adapter or migrated losslessly for v7 fine-tuning."
             )
         raise ValueError(
             f"RAM model {path} expects observation shape {shape}, but the active "
@@ -395,6 +411,8 @@ def make_ram_env(
             model = PPO.load(path, device="cpu")
             if is_legacy_v5_policy(model):
                 return LegacyV5PolicyAdapter(model)
+            if is_legacy_v6_policy(model):
+                return LegacyV6PolicyAdapter(model)
             validate_model_observation_space(model, path)
             validate_model_action_space(model, path)
             return model
@@ -441,6 +459,10 @@ def write_run_metadata(
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         commit = "unknown"
+    raw_resume_model = config.get("resume_model")
+    resume_model = (
+        resolve_repo_path(str(raw_resume_model)).resolve() if raw_resume_model else None
+    )
     metadata = {
         "environment": ENV_ID,
         "config_path": str(config_path.resolve()),
@@ -450,9 +472,25 @@ def write_run_metadata(
         "source_rom_sha1": file_sha1(source_rom),
         "active_rom_sha1": file_sha1(active_rom),
         "active_rom_path": str(active_rom.resolve()),
+        "resume_model": (
+            {"path": str(resume_model), "sha1": file_sha1(resume_model)}
+            if resume_model is not None
+            else None
+        ),
         "observation_version": DINO_RAM_OBSERVATION_VERSION,
         "observation_names": RAM_OBSERVATION_NAMES,
         "sector_progress_boundaries": DINO_SECTOR_BOUNDARIES,
+        "power_up_placements": [
+            {
+                "type": pickup.kind,
+                "x": pickup.x,
+                "y": pickup.y,
+                "z": pickup.z,
+                "progress": pickup.progress,
+                "lateral_offset": pickup.lateral_offset,
+            }
+            for pickup in DINO_BONEYARD_POWER_UPS
+        ],
         "action_space": {
             "type": "MultiDiscrete",
             "nvec": RAM_ACTION_COMPONENT_SIZES,

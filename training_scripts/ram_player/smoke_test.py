@@ -102,7 +102,11 @@ def main() -> None:
             f"progress={info['ram_player_progress']} "
             f"rank={info['ram_player_rank']} boost={info['ram_player_boost']} "
             f"jet_boost={info['ram_player_jet_boost_remaining']} "
-            f"skid={int(info['ram_player_skid_active'])}"
+            f"skid={int(info['ram_player_skid_active'])} "
+            f"next_pickup={int(info['ram_player_next_power_up_type'])} "
+            f"pickup_distance="
+            f"{float(info['ram_player_next_power_up_progress_distance']):.2f} "
+            f"pickup_available={int(info['ram_player_next_power_up_available'])}"
         )
         for slot in ((1, 2, 3) if opponent_league else opponents):
             print(
@@ -113,6 +117,9 @@ def main() -> None:
                 f"boost={int(info[f'ram_npc_{slot}_boost'])} "
                 f"jet_boost={int(info[f'ram_npc_{slot}_jet_boost_remaining'])} "
                 f"skid={int(info[f'ram_npc_{slot}_skid_active'])} "
+                f"next_pickup={int(info[f'ram_npc_{slot}_next_power_up_type'])} "
+                f"pickup_available="
+                f"{int(info[f'ram_npc_{slot}_next_power_up_available'])} "
                 f"held={int(info[f'ram_npc_{slot}_buttons_held']):#05x}"
             )
         print("Preflight only: no model was created and no training was started.")

@@ -28,7 +28,9 @@ from .legacy_policy import (
     LEGACY_V5_ACTIONS,
     LEGACY_V5_OBSERVATION_SIZE,
     LegacyV5PolicyAdapter,
+    LegacyV6PolicyAdapter,
     is_legacy_v5_policy,
+    is_legacy_v6_policy,
 )
 
 
@@ -54,11 +56,13 @@ def _model_kind(model: Any, path: Path) -> str:
     if shape == (DINO_RAM_OBSERVATION_SIZE,):
         validate_model_observation_space(model, path)
         validate_model_action_space(model, path)
+        return "v7"
+    if is_legacy_v6_policy(model):
         return "v6"
     if is_legacy_v5_policy(model):
         return "v5"
     raise ValueError(
-        f"hairpin state capture requires a v5 or v6 RAM model, got "
+        f"hairpin state capture requires a v5, v6, or v7 RAM model, got "
         f"observation {shape} and action space {model.action_space}"
     )
 
@@ -89,7 +93,12 @@ def main() -> None:
     config = load_config(args.config.expanduser().resolve())
     model = PPO.load(model_path, device=args.device)
     model_kind = _model_kind(model, model_path)
-    policy = LegacyV5PolicyAdapter(model) if model_kind == "v5" else model
+    if model_kind == "v5":
+        policy = LegacyV5PolicyAdapter(model)
+    elif model_kind == "v6":
+        policy = LegacyV6PolicyAdapter(model)
+    else:
+        policy = model
     env = make_ram_env(
         frame_skip=int(config["frame_skip"]),
         max_episode_steps=evaluation_episode_steps(config),

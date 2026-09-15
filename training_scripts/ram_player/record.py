@@ -30,6 +30,7 @@ from .common import (
     validate_model_observation_space,
 )
 from .media import RGBVideoWriter
+from .legacy_policy import adapt_legacy_policy
 
 
 def record_model(
@@ -57,9 +58,14 @@ def record_model(
         state_path=(str(opponent_state_path(config)) if opponent_paths else None),
         reward_config=config.get("reward"),
     )
-    model = PPO.load(model_path, device=device)
-    validate_model_observation_space(model, model_path)
-    validate_model_action_space(model, model_path)
+    loaded_model = PPO.load(model_path, device=device)
+    model = adapt_legacy_policy(loaded_model)
+    if model is loaded_model:
+        validate_model_observation_space(model, model_path)
+        validate_model_action_space(model, model_path)
+    reset_policy = getattr(model, "reset", None)
+    if callable(reset_policy):
+        reset_policy()
     observation, info = env.reset(seed=int(config["seed"]) + 30_000)
     encoder = RGBVideoWriter(video_path, env.render(), fps=60 / frame_skip)
     terminated = truncated = False
@@ -140,6 +146,53 @@ def record_model(
         "jet_boost_pickups": jet_boost_pickups,
         "skid_active_frames": skid_active_frames,
         "skid_active_rate": skid_active_frames / max(1, observed_frames),
+        "power_up_radar": {
+            "next_type": int(info.get("ram_player_next_power_up_type", -1)),
+            "next_x": int(info.get("ram_player_next_power_up_x", 0)),
+            "next_y": int(info.get("ram_player_next_power_up_y", 0)),
+            "next_z": int(info.get("ram_player_next_power_up_z", 0)),
+            "next_progress": float(info.get("ram_player_next_power_up_progress", 0.0)),
+            "next_progress_distance": float(
+                info.get("ram_player_next_power_up_progress_distance", 0.0)
+            ),
+            "next_target_lateral": float(
+                info.get("ram_player_next_power_up_target_lateral", 0.0)
+            ),
+            "next_lateral_error": float(
+                info.get("ram_player_next_power_up_lateral_error", 0.0)
+            ),
+            "next_available": bool(
+                info.get("ram_player_next_power_up_available", False)
+            ),
+            "next_is_jet_boost": bool(
+                info.get("ram_player_next_power_up_is_jet_boost", False)
+            ),
+            "jet_boost_approach_frames": int(
+                info.get("ram_player_jet_boost_approach_frames", 0)
+            ),
+            "jet_boost_approach_availability_rate": (
+                int(info.get("ram_player_jet_boost_approach_available_frames", 0))
+                / max(
+                    1,
+                    int(info.get("ram_player_jet_boost_approach_frames", 0)),
+                )
+            ),
+            "mean_jet_boost_approach_abs_lateral_error": (
+                float(
+                    info.get(
+                        "ram_player_jet_boost_approach_abs_lateral_error_total",
+                        0.0,
+                    )
+                )
+                / max(
+                    1,
+                    int(info.get("ram_player_jet_boost_approach_frames", 0)),
+                )
+            ),
+            "approach_reward": float(
+                info.get("ram_player_power_up_approach_reward_total", 0.0)
+            ),
+        },
         "action_rates": {
             name: frames / max(1, observed_frames)
             for name, frames in race_action_frames.items()

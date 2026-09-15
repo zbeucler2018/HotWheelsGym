@@ -88,7 +88,7 @@ integration at
 registers `HotWheelsGym/` as a Stable-Retro custom integration and asks RetroEnv
 to load that game's ROM, JSON data description, and selected savestate.
 
-For Player 1, a shared discrete RAM-policy action is translated to the normal
+For Player 1, a shared factorized RAM-policy action is translated to the normal
 Stable-Retro Boolean controller vector. Stable-Retro presents those buttons to
 the emulated keypad, and the unmodified game input path fills Player 1's racer
 button fields.
@@ -176,6 +176,44 @@ changed type/timer, and clearing either field from the acquired state removed
 the hairpin handling benefit. Scripted steering plus forced-value branches
 showed that `+0x27D` participates causally in native traction and heading logic.
 
+## Track pickup objects
+
+Pickup allocations are discovered separately by their vtable `0x0817C598`.
+The scanner accepts only aligned EWRAM objects with plausible state, type, and
+coordinate fields; the Dino wrapper then requires all seven expected X/Z/type
+identities before exposing the radar. It does not assume a fixed allocation
+address such as the `0x02008908` address observed in one replay.
+
+| Offset | Width (bits) | Meaning |
+| ---: | ---: | --- |
+| `+0x05` | 8 | Lifecycle: `0` available, `2` inactive, `3` respawning |
+| `+0x08` | 32 signed | World X |
+| `+0x0C` | 32 signed | World Y |
+| `+0x10` | 32 signed | World Z |
+| `+0x16` | 8 | Pickup type: Dino `3` Jet Boost, `6` boost refill |
+| `+0x18` | 8 | Respawn timer/state detail |
+
+A controlled replay changed the target object's lifecycle byte from `0` to `2`
+on exactly the frame that racer type/timer acquired Jet Boost. Longer replays
+observed `2 -> 3 -> 0`, establishing the availability lifecycle. A type-6 event
+increased Player 1's boost meter by 990 raw units, distinguishing the five
+boost-refill objects from the two Jet Boost objects.
+
+Every fixed pickup is projected onto the 342-point Dino reference line. The
+observation carries only next-pickup progress distance, target lateral offset,
+lateral error, availability, and Jet-Boost identity. Exact X/Y/Z, type, and
+projected progress remain in run metadata and the environment `info` mapping.
+Because the same live object tuple is passed to every ego observation, Player 1
+and all model-controlled opponents see identical global availability.
+
+The private four-player start state was captured just before pickup construction:
+it has zero pickup objects at reset, then the game creates 2, 3, 5, and all 7 by
+raw frames 1, 2, 4, and 8. The wrappers therefore use the known fixed layout with
+available defaults during only that start-line warmup, retry discovery each
+frame, and switch to validated live state as soon as all seven exist. No racer
+can reach the first pickup during those eight frames. A complete but mismatched
+layout still fails closed.
+
 ## Why Player 1 and model opponents are symmetric
 
 Control symmetry comes from constructing every slot as the same native
@@ -185,17 +223,21 @@ for slots 1–3.
 
 Observation symmetry is separate and is implemented in
 `build_dino_ram_observation()`. The function accepts a `controlled_slot` and
-rotates the same 62-value version-6 contract around that racer. Its own
+rotates the same 67-value version-7 contract around that racer. Its own
 heading, position, speed, boost, Jet Boost countdown, skid, lap/rank,
 short-term deltas, and Dino track-relative geometry always occupy the self
 fields. The other three racers are sorted by progress distance and represented
-relative to that ego racer. The same function is called by `DinoRAMPlayerEnv`
-for slot 0 and `DinoRAMModelOpponentEnv` for each controlled opponent.
+relative to that ego racer. Five pickup-radar values form the suffix. The same
+function is called by `DinoRAMPlayerEnv` for slot 0 and
+`DinoRAMModelOpponentEnv` for each controlled opponent.
 
-This symmetry means a version-5 Player 1 RAM checkpoint can occupy an opponent
-slot without redefining its inputs or outputs. It does not make old pixel
-models NPC-correct, and older RAM observations with 43, 54, 58, or 59 inputs
-remain shape-incompatible.
+Frozen version-6 policies can occupy an opponent slot through an adapter that
+removes only the five-value suffix. Fine-tuning migrates v6 by copying every
+parameter and zero-initializing the five added columns in both first network
+layers, preserving the source policy exactly at step zero. A version-5 policy
+still uses the existing action/observation compatibility adapter. This does not
+make old pixel models NPC-correct, and earlier RAM shapes remain incompatible
+for direct fine-tuning.
 
 ## Savestates and offline memory inspection
 
@@ -241,8 +283,9 @@ snapshots.
 - After any diagnostic that temporarily imports a patched image, re-import and
   revalidate the source image before returning to stock-ROM work.
 - Treat runtime addresses as untrusted until vtable, manager, pointer-list,
-  counts, back-pointers, and slot identity all validate. Never write opponent
-  controls into a stock CPU object or an undiscovered address.
+  counts, back-pointers, and slot identity all validate. Pickup objects must
+  also match the expected type/X/Z map. Never write opponent controls into a
+  stock CPU object or an undiscovered address.
 
 Useful read-only checks are:
 
@@ -269,7 +312,7 @@ writing an output ROM.
   supported.
 - The native-button construction hook has been dynamically validated on Dino
   Boneyard. Other tracks still need cold-start soak tests.
-- The 62-value geometry/observation contract is Dino Boneyard-specific. Other
+- The 67-value geometry/observation contract is Dino Boneyard-specific. Other
   tracks need their own reference geometry and power-up portability audit.
 - Runtime discovery expects one active race manager, no more than eight racers,
   known racer vtables, and internally consistent EWRAM pointers. It is intended

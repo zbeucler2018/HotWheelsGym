@@ -75,6 +75,23 @@ class NPCControlTests(unittest.TestCase):
                     memory.extract(configured, "<u4"),
                 )
 
+    def test_discovers_dino_power_ups_and_reads_live_availability(self):
+        memory = state_memory(self.integration / "dino_boneyard_multi.state")
+        addresses = npc.discover_power_up_addresses(memory)
+        power_ups = npc.read_power_up_states(memory, addresses)
+
+        self.assertEqual(len(addresses), 7)
+        self.assertEqual(len(set(addresses)), 7)
+        self.assertEqual([pickup.kind for pickup in power_ups].count(3), 2)
+        self.assertEqual([pickup.kind for pickup in power_ups].count(6), 5)
+        self.assertTrue(all(pickup.available for pickup in power_ups))
+
+        first = power_ups[0]
+        memory.assign(first.address + npc.POWER_UP_STATE_OFFSET, "|u1", 2)
+        updated = npc.read_power_up_states(memory, addresses)
+        self.assertFalse(updated[0].available)
+        self.assertTrue(all(pickup.available for pickup in updated[1:]))
+
     def test_progress_delta_handles_forward_wrap_and_backward_motion(self):
         self.assertEqual(npc.progress_delta(340, 2, 342), 4)
         self.assertEqual(npc.progress_delta(100, 97, 342), -3)

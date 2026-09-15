@@ -11,11 +11,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import cos, hypot, pi, sin
 
-from .npc_control import HEADING_PERIOD, RacerState
+from .npc_control import HEADING_PERIOD, PowerUpState, RacerState
 
 DINO_TRACK_POINT_COUNT = 342
 DINO_TRACK_LATERAL_SCALE = 1 << 20
 DINO_TRACK_LOOKAHEADS = (4, 12, 24)
+DINO_POWER_UP_JET_BOOST_TYPE = 3
+DINO_POWER_UP_BOOST_REFILL_TYPE = 6
+DINO_POWER_UP_PROGRESS_DISTANCE_SCALE = 64.0
+DINO_JET_BOOST_APPROACH_PROGRESS = 24.0
+DINO_JET_BOOST_APPROACH_LATERAL_SCALE = 0.5
 
 DINO_TRACK_OBSERVATION_NAMES = (
     "track_lateral_offset",
@@ -31,6 +36,26 @@ DINO_TRACK_OBSERVATION_NAMES = (
     "track_curvature_long",
 )
 DINO_TRACK_OBSERVATION_SIZE = len(DINO_TRACK_OBSERVATION_NAMES)
+DINO_POWER_UP_OBSERVATION_NAMES = (
+    "next_power_up_progress_distance",
+    "next_power_up_target_lateral",
+    "next_power_up_lateral_error",
+    "next_power_up_available",
+    "next_power_up_is_jet_boost",
+)
+DINO_POWER_UP_OBSERVATION_SIZE = len(DINO_POWER_UP_OBSERVATION_NAMES)
+
+# Exact native object coordinates discovered and dynamically validated on the
+# supported Dino Boneyard ROM. Types 3 and 6 are Jet Boost and boost refill.
+DINO_BONEYARD_POWER_UP_OBJECTS = (
+    (DINO_POWER_UP_BOOST_REFILL_TYPE, 4_016_744, -533_618, 9_880_310),
+    (DINO_POWER_UP_BOOST_REFILL_TYPE, 13_140_339, -410_564, 1_754_933),
+    (DINO_POWER_UP_BOOST_REFILL_TYPE, 15_433_710, -409_600, 20_757_852),
+    (DINO_POWER_UP_BOOST_REFILL_TYPE, 3_127_951, -446_294, 19_227_290),
+    (DINO_POWER_UP_JET_BOOST_TYPE, 10_038_491, -417_570, 7_568_627),
+    (DINO_POWER_UP_JET_BOOST_TYPE, 17_067_310, -306_085, 6_564_462),
+    (DINO_POWER_UP_BOOST_REFILL_TYPE, 11_839_550, -179_079, 14_393_595),
+)
 
 # Coordinates use the signed 24.8-ish world units exposed by racer +0xF8/+0x100.
 DINO_BONEYARD_CENTERLINE = (
@@ -398,6 +423,42 @@ class DinoTrackPose:
     features: tuple[float, ...]
 
 
+@dataclass(frozen=True)
+class DinoPowerUpPlacement:
+    """One fixed Dino pickup projected into track-relative coordinates."""
+
+    kind: int
+    x: int
+    y: int
+    z: int
+    progress: float
+    lateral_offset: float
+
+
+@dataclass(frozen=True)
+class DinoPowerUpRadar:
+    """Compact racer-relative description of the next pickup on the lap."""
+
+    placement: DinoPowerUpPlacement
+    progress_distance: float
+    lateral_error: float
+    available: bool
+
+    @property
+    def is_jet_boost(self) -> bool:
+        return self.placement.kind == DINO_POWER_UP_JET_BOOST_TYPE
+
+    @property
+    def features(self) -> tuple[float, ...]:
+        return (
+            _clip(self.progress_distance / DINO_POWER_UP_PROGRESS_DISTANCE_SCALE),
+            _clip(self.placement.lateral_offset),
+            _clip(self.lateral_error),
+            float(self.available),
+            float(self.is_jet_boost),
+        )
+
+
 def _clip(value: float) -> float:
     return max(-1.0, min(1.0, value))
 
@@ -433,6 +494,87 @@ def _segment_projection(
         tangent_x, tangent_z = _unit(dx, dz)
     distance_squared = (x - projected_x) ** 2 + (z - projected_z) ** 2
     return distance_squared, fraction, projected_x, projected_z, tangent_x, tangent_z
+
+
+def _power_up_placement(kind: int, x: int, y: int, z: int) -> DinoPowerUpPlacement:
+    best: tuple[float, int, float, float, float, float, float] | None = None
+    for index, start in enumerate(DINO_BONEYARD_CENTERLINE):
+        end = DINO_BONEYARD_CENTERLINE[(index + 1) % DINO_TRACK_POINT_COUNT]
+        projection = _segment_projection(x, z, start, end)
+        candidate = (projection[0], index, *projection[1:])
+        if best is None or candidate[0] < best[0]:
+            best = candidate
+    assert best is not None
+    _, index, fraction, center_x, center_z, tangent_x, tangent_z = best
+    lateral = (
+        (x - center_x) * tangent_z - (z - center_z) * tangent_x
+    ) / DINO_TRACK_LATERAL_SCALE
+    return DinoPowerUpPlacement(
+        kind=kind,
+        x=x,
+        y=y,
+        z=z,
+        progress=index + fraction,
+        lateral_offset=_clip(lateral),
+    )
+
+
+DINO_BONEYARD_POWER_UPS = tuple(
+    sorted(
+        (_power_up_placement(*values) for values in DINO_BONEYARD_POWER_UP_OBJECTS),
+        key=lambda pickup: pickup.progress,
+    )
+)
+
+
+def dino_next_power_up_radar(
+    track: DinoTrackPose,
+    power_ups: tuple[PowerUpState, ...] | None = None,
+) -> DinoPowerUpRadar:
+    """Describe the next fixed pickup ahead, including its live availability."""
+
+    availability = {
+        (pickup.kind, pickup.x, pickup.z): pickup.available
+        for pickup in power_ups or ()
+    }
+    expected = {(pickup.kind, pickup.x, pickup.z) for pickup in DINO_BONEYARD_POWER_UPS}
+    if power_ups is not None:
+        missing = expected - set(availability)
+        if missing:
+            raise RuntimeError(
+                f"Dino power-up layout is missing {len(missing)} expected object(s)"
+            )
+    current_progress = track.progress_index + track.segment_fraction
+    placement = min(
+        DINO_BONEYARD_POWER_UPS,
+        key=lambda pickup: (pickup.progress - current_progress)
+        % DINO_TRACK_POINT_COUNT,
+    )
+    progress_distance = (placement.progress - current_progress) % DINO_TRACK_POINT_COUNT
+    key = (placement.kind, placement.x, placement.z)
+    return DinoPowerUpRadar(
+        placement=placement,
+        progress_distance=progress_distance,
+        lateral_error=placement.lateral_offset - track.lateral_offset,
+        available=availability.get(key, True),
+    )
+
+
+def dino_jet_boost_approach_potential(radar: DinoPowerUpRadar) -> float:
+    """Bounded alignment potential near an available Jet Boost pickup."""
+
+    if (
+        not radar.available
+        or not radar.is_jet_boost
+        or radar.progress_distance > DINO_JET_BOOST_APPROACH_PROGRESS
+    ):
+        return 0.0
+    proximity = 1.0 - radar.progress_distance / DINO_JET_BOOST_APPROACH_PROGRESS
+    alignment = max(
+        0.0,
+        1.0 - abs(radar.lateral_error) / DINO_JET_BOOST_APPROACH_LATERAL_SCALE,
+    )
+    return proximity * alignment
 
 
 def _track_tangent(index: int, radius: int = 2) -> tuple[float, float]:

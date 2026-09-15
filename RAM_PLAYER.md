@@ -75,7 +75,9 @@ available. It also records the mean remaining handling/Jet Boost effect,
 active-frame rate, number of pickups, and native skid-frame rate. Completed-lap
 times appear as `mean_lap_1_seconds`,
 `mean_lap_2_seconds`, and `mean_lap_3_seconds` in TensorBoard and the evaluation
-CSV.
+CSV. Observation-v7 runs additionally log mean absolute lateral error while a
+Jet Boost is within the 24-progress approach window, how often that target was
+still available, and the accumulated bounded approach-shaping reward.
 
 The same evaluation measures twelve full-lap sectors at raw-frame resolution.
 The boundaries are progress `0, 32, 45, 61, 92, 124, 156, 188, 220, 252, 284,
@@ -95,6 +97,8 @@ active frames, and handling/Jet Boost timing and pickup counts in addition to
 native skid timing, exact lap-split frames/seconds, race outcome, and
 track-quality metrics. The JSON sidecar also contains the derived twelve-sector
 summary.
+For observation-v7 recordings it also includes the exact next-pickup identity
+and coordinates plus the pickup-approach diagnostics.
 Pass `--no-record-video` only when this final recording is not wanted.
 
 ## Validated project checkpoint (v3, 2026-09-10)
@@ -222,7 +226,7 @@ directory; videos are intentionally not encoded as TensorBoard images.
 
 ## Observation and action contract
 
-Every controlled racer—Player 1 or an opponent—gets the same 62 normalized
+Every controlled racer—Player 1 or an opponent—gets the same 67 normalized
 floats, rotated so that racer is always the observation's ego:
 
 - heading sine/cosine, absolute Dino X/Z, speed, boost charge, normalized
@@ -234,7 +238,10 @@ floats, rotated so that racer is always the observation's ego:
 - medium- and long-range signed track curvature;
 - nine one-hot values encoding the previous drive, steering, and boost choices;
 - for the three nearest racers: ego-frame forward/right/distance, relative
-  total progress, speed, boost charge, heading sine/cosine, and relative lap.
+  total progress, speed, boost charge, heading sine/cosine, and relative lap;
+- five live pickup-radar values for the next object ahead: normalized progress
+  distance, its target lateral offset, the racer's lateral error to it, global
+  availability, and whether it is Jet Boost.
 
 The Dino reference line contains one X/Z point per modulo-342 progress unit. It
 was derived from median native-racer telemetry over repeated laps; no ROM bytes
@@ -251,10 +258,10 @@ adjacent valid samples, was within 1 MPH on 94.7%, and within 2 MPH on 96.2%.
 No stable integer, BCD, or ASCII HUD-speed value was found in EWRAM or IWRAM,
 so the displayed number is probably converted transiently by the rendering
 path. The probe reached raw speed 77,894 and clipped the current observation on
-3.15% of samples. V6 deliberately retains the existing scale; this conversion
+3.15% of samples. V7 deliberately retains the existing scale; this conversion
 is a human-facing diagnostic estimate, not an exact MPH source of truth.
 
-This is observation contract version 6. The racer-local boost meter at `+0xF0`
+This is observation contract version 7. The racer-local boost meter at `+0xF0`
 is normalized from 0 to its maximum of 980. The same offset was verified against
 the configured Player 1 boost address on every bundled multiplayer track and
 against all four Dino racer objects. The neighboring `+0xEC` field is only a
@@ -268,6 +275,27 @@ the pickup into a fixed Player 1 trajectory caused both bytes to change; clearin
 either byte from that same acquired state removed the handling benefit through
 the hairpin.
 
+The pickup radar comes from the actual track-object records rather than guessed
+screen locations. Runtime discovery scans EWRAM for pickup vtable `0x0817C598`,
+then reads object state, type, and X/Y/Z. State `0` is available, state `2` is
+collected/inactive, and state `3` is the respawn transition. Availability is a
+shared track fact, so Player 1 and every model NPC see the same value.
+
+The validated Dino Boneyard layout is:
+
+| Progress | Type | X | Y | Z | Lateral |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 42.971 | Jet Boost | 10,038,491 | -417,570 | 7,568,627 | -0.1889 |
+| 94.448 | Boost refill | 4,016,744 | -533,618 | 9,880,310 | -0.1583 |
+| 148.983 | Boost refill | 13,140,339 | -410,564 | 1,754,933 | 0.0795 |
+| 170.519 | Jet Boost | 17,067,310 | -306,085 | 6,564,462 | 0.0740 |
+| 216.000 | Boost refill | 11,839,550 | -179,079 | 14,393,595 | -0.2045 |
+| 252.411 | Boost refill | 15,433,710 | -409,600 | 20,757,852 | 0.0930 |
+| 307.182 | Boost refill | 3,127,951 | -446,294 | 19,227,290 | -0.1457 |
+
+The coordinates are retained in run metadata and `info`; the neural network
+gets the compact track-relative radar, not large raw coordinate magnitudes.
+
 Racer byte `+0x27D` is the native skid/loss-of-grip state and is exposed as the
 binary `self_skid_active` feature. Scripted high-speed left and right trials made
 it activate when heading changes reached roughly 40 units per physics update;
@@ -280,12 +308,12 @@ high reached 56 with 26 wall frames. It therefore carries causal native physics
 state rather than being only an animation flag or a duplicate power-up field.
 
 Previous 43-input v1, 54-input v2, 58-input v3, 59-input v4, and 60-input v5
-checkpoints are intentionally incompatible:
-their neural-network input layers cannot accept the new features. The tools
-detect all five formats and report a clear migration error. Train the first v6
-model from scratch; subsequent v6 checkpoints can be used symmetrically for
-self-play. Other tracks' power-up types still need a portability audit before
-their effects are added to this Dino-specific contract.
+checkpoints remain shape-incompatible for direct fine-tuning. The 62-input v6
+contract is the exact prefix of v7: evaluation and NPC loading strip the five
+new values for a frozen v6 policy, while training can expand both first network
+layers with zero-weight columns. That migration is lossless—the starting v7
+policy produces exactly the same actions as its v6 source until learning uses
+the radar. Other tracks' power-up layouts still need a portability audit.
 
 The legacy v6 reward remains progress-dominant and finish-aware. Small shaping
 penalties discourage wall contact, large centerline error, wrong-way alignment,
@@ -306,9 +334,9 @@ policy can use pure L+R, keep A held with A+L+R, and steer left or right during
 either form. All 24 combinations pass through the same native Player 1 button
 path for Player 1 and converted opponents.
 
-### Time-trial v7 objective and curriculum
+### Historical time-trial experiment v7
 
-`dino_boneyard_time_trial_v7.yml` keeps the v6 62-value observation and full
+`dino_boneyard_time_trial_v7.yml` kept the v6 62-value observation and full
 `MultiDiscrete(4, 3, 2)` action contract, so v6 factorized checkpoints can be
 fine-tuned directly. Braking and coasting remain available for hairpin attempts
 where the policy misses Jet Boost.
@@ -462,6 +490,39 @@ the frozen league; MP4s remain on disk rather than being embedded in
 TensorBoard. Environment construction does not consume a reset, so the first
 explicit evaluation reset begins the first rotation and those three races are
 exactly one complete balanced cycle.
+
+The completed v9 checkpoint sweep retained `final_model.zip` as the fastest
+stock-opponent race: **4:22.92** (`15,775` raw frames), first place, with lap
+splits **1:33.60**, **1:24.73**, and **1:24.58**. It used boost deliberately but
+collected no Jet Boost in that race. This is the preserved baseline for pickup
+work; it is already faster than the 4:24 pixel model and essentially tied with
+the supplied 4:22.15 console run.
+
+### Power-up-radar v10 fine-tune
+
+`dino_boneyard_power_up_radar_v10.yml` starts from that exact v9 checkpoint and
+migrates observation v6 to v7 losslessly. It trains 750,000 additional steps at
+15 Hz with three workers. Half of resets use the real starting grid, 40% begin
+at the pre-pickup approach, and 10% begin just after a real Jet Boost pickup.
+The first pass uses stock opponents to isolate pickup-line learning before
+putting the successful policy back into the frozen self-play league.
+
+The existing 8-point one-shot Jet Boost bonus remains. A new potential-
+difference term adds at most 2 points while approaching an available Jet Boost
+within 24 progress units: it rewards reducing lateral error as the pickup gets
+closer, pays the remaining potential on acquisition, and pays accumulated
+potential back if the car passes without collecting. It cannot be farmed by
+circling or rewarded merely for possessing the effect. TensorBoard, evaluation
+CSV, Monitor logs, and recording JSON sidecars report approach lateral error,
+availability, and shaping reward.
+
+The YAML contains its own `resume_model`, so the prepared run command is:
+
+```bash
+uv run --no-sync python -m training_scripts.ram_player.train \
+  --rom rom.gba \
+  --config training_scripts/ram_player/dino_boneyard_power_up_radar_v10.yml
+```
 
 Stable-Retro savestates restore racer objects after construction. Therefore an
 old checked-in multiplayer state still contains stock CPU objects even with the

@@ -93,11 +93,11 @@ four player/link racers and zero CPU racers. It then redirects the call at
 - vehicle indices 1–3 return immediately, preserving independent external
   writes to `+0x302/+0x304/+0x306`.
 
-The emulator-side wrapper converts each of the same seven policy actions used
-by Player 1 into native 10-bit GBA pressed/released/held masks and writes them
-to those three racer-local fields every frame. All four vehicles then pass
-through the same player-class update and native physics. Generated copies carry
-the `HWBT` version-3 marker and expected SHA-1
+The emulator-side wrapper converts the same factorized drive/steering/boost
+action used by Player 1 into native 10-bit GBA pressed/released/held masks and
+writes them to those three racer-local fields every frame. All four vehicles
+then pass through the same player-class update and native physics. Generated
+copies carry the `HWBT` version-3 marker and expected SHA-1
 `e88db49ffc5ce3464d1ea5d941971e1ffe54c01a`; ROM files remain ignored.
 
 ## Dino Boneyard track-relative RAM contract
@@ -115,6 +115,12 @@ Observation version 5 adds the native binary skid/loss-of-grip state at racer
 `+0x27D`, producing 60 symmetric floats for Player 1 and player-class model
 opponents.
 
+Observation version 6 factorizes drive, steering, and boost, expands prior-
+action context to nine one-hot values, and produces 62 symmetric floats.
+Observation version 7 appends a five-value next-pickup radar for 67 floats. The
+v6 values remain an exact prefix, permitting frozen-policy adaptation and
+lossless first-layer expansion with zero-initialized pickup columns.
+
 The Jet Boost mapping is causal, not just correlated: moving the pickup into an
 otherwise fixed Player 1 trajectory acquired type 3 and its timer, while clearing
 either field from the same acquired state removed the handling benefit through
@@ -129,6 +135,33 @@ logic at `0x0810285E` and `0x08102D2E`. With an identical 328-frame hairpin inpu
 sequence, the native state reached progress 66 with no wall frames; forced zero
 reached 62 with 14 wall frames, and forced one reached 56 with 26 wall frames.
 This rules out a display-only flag and justifies exposing it to the policy.
+
+## Dino Boneyard pickup objects
+
+Track pickups use vtable `0x0817C598`. A controlled 12,000-frame replay changed
+the target object's byte `+0x05` from state `0` to `2` on the exact Jet Boost
+acquisition frame. Continued replay observed `2 -> 3 -> 0`, establishing
+available, inactive, and respawn-transition states. The object layout also has
+signed X/Y/Z at `+0x08/+0x0C/+0x10`, type at `+0x16`, and a respawn detail byte
+at `+0x18`. A type-6 acquisition increased boost by 990 units; type 3 is the
+causally verified Jet Boost/handling pickup.
+
+The complete Dino Boneyard layout contains two type-3 Jet Boost objects and five
+type-6 boost refills:
+
+| Track progress | Type | X | Y | Z | Lateral offset |
+|---:|---|---:|---:|---:|---:|
+| 42.971 | Jet Boost | 10,038,491 | -417,570 | 7,568,627 | -0.1889 |
+| 94.448 | Boost refill | 4,016,744 | -533,618 | 9,880,310 | -0.1583 |
+| 148.983 | Boost refill | 13,140,339 | -410,564 | 1,754,933 | 0.0795 |
+| 170.519 | Jet Boost | 17,067,310 | -306,085 | 6,564,462 | 0.0740 |
+| 216.000 | Boost refill | 11,839,550 | -179,079 | 14,393,595 | -0.2045 |
+| 252.411 | Boost refill | 15,433,710 | -409,600 | 20,757,852 | 0.0930 |
+| 307.182 | Boost refill | 3,127,951 | -446,294 | 19,227,290 | -0.1457 |
+
+Runtime code scans by vtable because allocation addresses move, then validates
+the seven type/X/Z identities against this map. Availability is global and the
+same live objects feed Player 1 and every model-controlled opponent observation.
 
 A 12,000-frame native-racer replay produced a median normalized lateral error
 of 0.0023 (95th percentile 0.112), mean heading alignment of 0.938, and a local
