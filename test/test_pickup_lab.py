@@ -8,7 +8,7 @@ import gymnasium as gym
 import numpy as np
 
 from HotWheelsGym.ram_opponent_control import DINO_RAM_OBSERVATION_SIZE
-from training_scripts.ram_player.common import InitialStatePool
+from training_scripts.ram_player.common import InitialStatePool, load_config
 from training_scripts.ram_player.pickup_lab import (
     PICKUP_AVAILABLE_INDEX,
     PICKUP_DISTANCE_INDEX,
@@ -71,6 +71,21 @@ class ScriptedPickupEnv(gym.Env):
 
 
 class PickupLabTests(unittest.TestCase):
+    def test_v11_config_pretrains_strongly_and_cannot_reward_stalling(self):
+        config = load_config(
+            Path(__file__).resolve().parents[1]
+            / "training_scripts"
+            / "ram_player"
+            / "dino_boneyard_pickup_expert_v11.yml"
+        )
+
+        self.assertEqual(config["behavior_cloning"]["epochs"], 200)
+        self.assertGreater(
+            config["pickup_task"]["timeout_penalty"],
+            config["pickup_task"]["miss_penalty"],
+        )
+        self.assertGreater(config["pickup_task"]["frame_cost"], 0.0)
+
     def test_composite_gates_expert_only_through_pickup_hairpin(self):
         class NamedPolicy:
             def __init__(self, action):
