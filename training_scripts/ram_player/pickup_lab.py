@@ -38,6 +38,8 @@ PICKUP_DISTANCE_INDEX = RAM_OBSERVATION_NAMES.index("next_power_up_progress_dist
 PICKUP_AVAILABLE_INDEX = RAM_OBSERVATION_NAMES.index("next_power_up_available")
 PICKUP_TYPE_INDEX = RAM_OBSERVATION_NAMES.index("next_power_up_is_jet_boost")
 JET_BOOST_REMAINING_INDEX = RAM_OBSERVATION_NAMES.index("self_jet_boost_remaining")
+PICKUP_LATERAL_ERROR_INDEX = RAM_OBSERVATION_NAMES.index("next_power_up_lateral_error")
+SELF_LAP_INDEX = RAM_OBSERVATION_NAMES.index("self_lap")
 
 PICKUP_MONITOR_INFO_KEYS = (
     "pickup_task_success",
@@ -48,6 +50,8 @@ PICKUP_MONITOR_INFO_KEYS = (
     "pickup_task_frames",
     "pickup_task_frames_to_pickup",
     "pickup_task_exit_speed",
+    "pickup_task_exit_abs_lateral_offset",
+    "pickup_task_exit_heading_alignment",
     "pickup_task_mean_abs_lateral_error",
     "pickup_task_score_gained",
 )
@@ -69,6 +73,9 @@ class PickupTaskConfig:
     pickup_bonus: float = 100.0
     exit_bonus: float = 25.0
     exit_speed_scale: float = 10.0
+    exit_progress: float = float(DINO_HAIRPIN_END_PROGRESS)
+    exit_lateral_penalty: float = 0.0
+    exit_heading_scale: float = 0.0
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, object] | None) -> "PickupTaskConfig":
@@ -83,6 +90,8 @@ class PickupTaskConfig:
         for field in fields(config):
             if getattr(config, field.name) < 0:
                 raise ValueError(f"pickup-task field {field.name} must be nonnegative")
+        if config.exit_progress <= HAIRPIN_PICKUP.progress:
+            raise ValueError("pickup-task exit_progress must be after the pickup")
         return config
 
 
@@ -90,8 +99,9 @@ class DinoPickupHairpinTask(gym.Wrapper):
     """Turn the first pickup and hairpin into a seconds-long episodic task.
 
     A miss ends immediately after the car passes the pickup. A collection keeps
-    running through progress 61 so the expert must also leave the hairpin at
-    useful speed. The full-race reward is deliberately discarded.
+    running to the configured handoff progress so the expert must return the
+    car to a useful racing state. The full-race reward is deliberately
+    discarded.
     """
 
     def __init__(
@@ -133,6 +143,16 @@ class DinoPickupHairpinTask(gym.Wrapper):
             "pickup_task_exit_speed": (
                 int(info.get("ram_player_speed", 0)) if self._success else 0
             ),
+            "pickup_task_exit_abs_lateral_offset": (
+                abs(float(info.get("ram_player_lateral_offset", 0.0)))
+                if self._success
+                else 0.0
+            ),
+            "pickup_task_exit_heading_alignment": (
+                float(info.get("ram_player_heading_alignment", 0.0))
+                if self._success
+                else 0.0
+            ),
             "pickup_task_mean_abs_lateral_error": (
                 self._lateral_error_total / max(1, self._lateral_error_frames)
             ),
@@ -159,7 +179,7 @@ class DinoPickupHairpinTask(gym.Wrapper):
             )
         self._start_distance = distance
         self._exit_distance = distance + (
-            DINO_HAIRPIN_END_PROGRESS - HAIRPIN_PICKUP.progress
+            self.config.exit_progress - HAIRPIN_PICKUP.progress
         )
         self._progress = 0.0
         self._frames = 0
@@ -231,9 +251,15 @@ class DinoPickupHairpinTask(gym.Wrapper):
                 1.0,
                 max(0.0, float(info.get("ram_player_speed", 0)) / RAM_SPEED_SCALE),
             )
-            reward += (
-                self.config.exit_bonus + self.config.exit_speed_scale * speed_ratio
+            lateral_offset = abs(float(info.get("ram_player_lateral_offset", 0.0)))
+            heading_alignment = max(
+                -1.0,
+                min(1.0, float(info.get("ram_player_heading_alignment", 0.0))),
             )
+            reward += self.config.exit_bonus
+            reward += self.config.exit_speed_scale * speed_ratio
+            reward += self.config.exit_heading_scale * (heading_alignment + 1.0) / 2.0
+            reward -= self.config.exit_lateral_penalty * lateral_offset
             terminated = True
 
         if truncated and not self._success:
@@ -250,9 +276,16 @@ class DinoPickupHairpinTask(gym.Wrapper):
 class PickupExpertCompositePolicy:
     """Gate a local pickup expert into an otherwise frozen full-race policy."""
 
-    def __init__(self, base_policy: Any, pickup_expert: Any) -> None:
+    def __init__(
+        self,
+        base_policy: Any,
+        pickup_expert: Any,
+        *,
+        handoff_progress: float = float(DINO_HAIRPIN_END_PROGRESS),
+    ) -> None:
         self.base_policy = base_policy
         self.pickup_expert = pickup_expert
+        self.handoff_progress = handoff_progress
         self._expert_active = False
         self._expert_acquired = False
 
@@ -289,7 +322,7 @@ class PickupExpertCompositePolicy:
                 float(observation[PICKUP_TYPE_INDEX]) <= 0.5
                 or float(observation[PICKUP_AVAILABLE_INDEX]) <= 0.5
             )
-            if progress >= DINO_HAIRPIN_END_PROGRESS or (
+            if progress >= self.handoff_progress or (
                 target_lost and not self._expert_acquired
             ):
                 self._expert_active = False
@@ -305,6 +338,77 @@ class PickupExpertCompositePolicy:
             self._expert_acquired = False
         policy = self.pickup_expert if self._expert_active else self.base_policy
         return policy.predict(observation, deterministic=deterministic)
+
+
+class PickupFeedbackCompositePolicy:
+    """Use pickup-relative RAM feedback to generate corrective demonstrations."""
+
+    def __init__(
+        self,
+        base_policy: Any,
+        *,
+        activation_distance: float = 10.0,
+        early_lap_deadband: float = 0.05,
+        final_lap_deadband: float = 0.2,
+    ) -> None:
+        self.base_policy = base_policy
+        self.activation_distance = activation_distance
+        self.early_lap_deadband = early_lap_deadband
+        self.final_lap_deadband = final_lap_deadband
+        self._active = False
+
+    def reset(self) -> None:
+        self._active = False
+        reset_policy = getattr(self.base_policy, "reset", None)
+        if callable(reset_policy):
+            reset_policy()
+
+    def predict(
+        self,
+        observation: Any,
+        *,
+        deterministic: bool = True,
+    ) -> Any:
+        if getattr(observation, "ndim", 1) != 1:
+            raise ValueError("pickup feedback controller expects one observation")
+        progress = PickupExpertCompositePolicy._progress(observation)
+        target_available = (
+            float(observation[PICKUP_TYPE_INDEX]) > 0.5
+            and float(observation[PICKUP_AVAILABLE_INDEX]) > 0.5
+        )
+        if self._active and (
+            float(observation[JET_BOOST_REMAINING_INDEX]) > 0.0
+            or not target_available
+            or progress >= DINO_HAIRPIN_END_PROGRESS
+        ):
+            self._active = False
+        if (
+            not self._active
+            and progress < DINO_HAIRPIN_END_PROGRESS
+            and target_available
+            and float(observation[JET_BOOST_REMAINING_INDEX]) <= 0.0
+            and float(observation[PICKUP_DISTANCE_INDEX])
+            <= self.activation_distance / 64.0
+        ):
+            self._active = True
+        if not self._active:
+            return self.base_policy.predict(
+                observation,
+                deterministic=deterministic,
+            )
+
+        lateral_error = float(observation[PICKUP_LATERAL_ERROR_INDEX])
+        deadband = (
+            self.final_lap_deadband
+            if float(observation[SELF_LAP_INDEX]) > 0.75
+            else self.early_lap_deadband
+        )
+        steering = 0
+        if lateral_error < -deadband:
+            steering = 1
+        elif lateral_error > deadband:
+            steering = 2
+        return (1, steering, 0), None
 
 
 def make_pickup_lab_env(
@@ -362,6 +466,8 @@ class PickupEvaluation:
     mean_success_frames: float
     mean_frames_to_pickup: float
     mean_exit_speed: float
+    mean_exit_abs_lateral_offset: float
+    mean_exit_heading_alignment: float
     mean_abs_lateral_error: float
     mean_score_gained: float
     selection_score: float
@@ -386,6 +492,8 @@ def evaluate_pickup_policy(
     success_frames: list[float] = []
     pickup_frames: list[float] = []
     exit_speeds: list[float] = []
+    exit_lateral_offsets: list[float] = []
+    exit_heading_alignments: list[float] = []
     lateral_errors: list[float] = []
     scores: list[float] = []
 
@@ -414,6 +522,12 @@ def evaluate_pickup_policy(
         if success:
             success_frames.append(episode_frames)
             exit_speeds.append(float(info.get("pickup_task_exit_speed", 0)))
+            exit_lateral_offsets.append(
+                float(info.get("pickup_task_exit_abs_lateral_offset", 0.0))
+            )
+            exit_heading_alignments.append(
+                float(info.get("pickup_task_exit_heading_alignment", 0.0))
+            )
         if acquired:
             pickup_frames.append(float(info.get("pickup_task_frames_to_pickup", 0)))
         lateral_errors.append(
@@ -425,13 +539,19 @@ def evaluate_pickup_policy(
     pickup_rate = fmean(pickups)
     mean_success_frames = fmean(success_frames) if success_frames else fmean(frames)
     mean_exit_speed = fmean(exit_speeds) if exit_speeds else 0.0
+    mean_exit_lateral = fmean(exit_lateral_offsets) if exit_lateral_offsets else 0.0
+    mean_exit_heading = (
+        fmean(exit_heading_alignments) if exit_heading_alignments else 0.0
+    )
     # Success dominates collection; collection dominates speed. This prevents a
     # fast miss from replacing a slower policy that actually solves the skill.
     selection_score = (
         success_rate * 1_000.0
         + pickup_rate * 100.0
-        - mean_success_frames / 1_000.0
-        + mean_exit_speed / 1_000_000.0
+        - mean_success_frames / 100.0
+        + mean_exit_speed / 100_000.0
+        + mean_exit_heading
+        - mean_exit_lateral
     )
     return PickupEvaluation(
         mean_reward=fmean(rewards),
@@ -444,6 +564,8 @@ def evaluate_pickup_policy(
         mean_success_frames=mean_success_frames,
         mean_frames_to_pickup=(fmean(pickup_frames) if pickup_frames else 0.0),
         mean_exit_speed=mean_exit_speed,
+        mean_exit_abs_lateral_offset=mean_exit_lateral,
+        mean_exit_heading_alignment=mean_exit_heading,
         mean_abs_lateral_error=fmean(lateral_errors),
         mean_score_gained=fmean(scores),
         selection_score=selection_score,

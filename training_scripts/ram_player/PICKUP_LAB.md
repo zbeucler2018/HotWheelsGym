@@ -13,10 +13,11 @@ maneuver that the full-race policies consistently miss.
    traces are saved for behavior cloning.
 2. `train_pickup.py` behavior-clones those successful traces, then runs PPO on
    `DinoPickupHairpinTask`. A miss, Player 1 respawn, or timeout ends the short
-episode. A successful episode must collect the pickup and reach progress 61
-with useful exit speed. Timeout is intentionally more expensive than a miss,
-and every raw frame has a cost, so stopping before the pickup is not a viable
-reward shortcut.
+   episode. The original v11 task ends at progress 61. The recovery-aware v12
+   task continues through progress 100 and scores exit speed, lateral offset,
+   and heading alignment before handing control back. Timeout is intentionally
+   more expensive than a miss, and every raw frame has a cost, so stopping
+   before the pickup is not a viable reward shortcut.
 3. Six fixed holdout states are evaluated deterministically every 25,000
    timesteps. Checkpoint selection prioritizes success rate, then pickup rate,
    then maneuver time and exit speed.
@@ -50,6 +51,27 @@ uv run --no-sync python -m training_scripts.ram_player.train_pickup \
   --config training_scripts/ram_player/dino_boneyard_pickup_expert_v11.yml
 ```
 
+Generate recovery-aware corrective demonstrations from only the v9 training
+states, keeping the fixed evaluation split unseen:
+
+```bash
+uv run --no-sync python -m training_scripts.ram_player.generate_pickup_recovery_demos \
+  --rom rom.gba \
+  --manifest training_scripts/ram_runs/private/dino_pickup_lab/manifest.json \
+  --base-model training_scripts/ram_runs/dino_ram_player_self_play_v9_20260915T021134Z/evaluation_sweep_20260915T110125Z/fastest_model.zip \
+  --source-policy v9 \
+  --exit-progress 100 \
+  --output training_scripts/ram_runs/private/dino_pickup_recovery/feedback_recovery_demonstrations.npz
+```
+
+Then train v12 with the longer recovery objective:
+
+```bash
+uv run --no-sync python -m training_scripts.ram_player.train_pickup \
+  --rom rom.gba \
+  --config training_scripts/ram_player/dino_boneyard_pickup_recovery_v12.yml
+```
+
 Compare the best expert against the unchanged full-race base and record the
 composite race:
 
@@ -77,6 +99,19 @@ uv run --no-sync python -m training_scripts.ram_player.audit_mechanics \
 
 The boost component is `L+R`; acceleration is a separate drive component. The
 audit therefore tests pure `L+R` and `A+L+R` separately.
+
+`PickupFeedbackCompositePolicy` is a deterministic bootstrap controller, not a
+replacement champion. It activates only within ten progress units of the first
+Jet Boost, applies a narrow pickup-relative steering correction, and hands
+control back to the frozen race policy immediately after acquisition. It is
+intended to generate corrective demonstrations; it must beat the frozen policy
+in a complete-race A/B before it can be considered for promotion.
+
+The full-race feedback A/B is deliberately a hard gate. The tuned controller
+collected the pickup and improved the isolated hairpin time, but its altered
+pose made later sectors brittle. That negative result is why v12 evaluates the
+whole recovery through progress 100 instead of optimizing pickup acquisition
+alone.
 
 ## Observation compatibility
 

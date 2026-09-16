@@ -18,7 +18,7 @@ from .common import (
     prepare_rom,
 )
 from .media import RGBVideoWriter
-from .pickup_lab import PickupExpertCompositePolicy
+from .pickup_lab import PickupExpertCompositePolicy, PickupFeedbackCompositePolicy
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -27,7 +27,15 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--rom", type=Path, required=True)
     parser.add_argument("--base-model", type=Path, required=True)
-    parser.add_argument("--expert-model", type=Path, required=True)
+    policy = parser.add_mutually_exclusive_group(required=True)
+    policy.add_argument("--expert-model", type=Path)
+    policy.add_argument("--feedback-controller", action="store_true")
+    parser.add_argument(
+        "--handoff-progress",
+        type=float,
+        default=61.0,
+        help="progress where a learned expert returns control to the base policy",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--video", type=Path)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -125,14 +133,28 @@ def main() -> None:
     )
     config = load_config(args.config.expanduser().resolve())
     base = load_ram_policy(args.base_model, device=args.device)
-    expert = load_ram_policy(args.expert_model, device=args.device)
-    composite = PickupExpertCompositePolicy(base, expert)
+    if args.feedback_controller:
+        expert = None
+        composite = PickupFeedbackCompositePolicy(base)
+    else:
+        expert = load_ram_policy(args.expert_model, device=args.device)
+        composite = PickupExpertCompositePolicy(
+            base,
+            expert,
+            handoff_progress=args.handoff_progress,
+        )
 
     base_result = _evaluate(base, config, args.episodes)
     composite_result = _evaluate(composite, config, args.episodes)
     report: dict[str, Any] = {
         "base_model": str(args.base_model.expanduser().resolve()),
-        "expert_model": str(args.expert_model.expanduser().resolve()),
+        "expert_model": (
+            str(args.expert_model.expanduser().resolve())
+            if args.expert_model is not None
+            else None
+        ),
+        "feedback_controller": args.feedback_controller,
+        "handoff_progress": args.handoff_progress,
         "episodes": args.episodes,
         "base": base_result,
         "composite": composite_result,

@@ -182,6 +182,13 @@ def main() -> None:
     training_states, evaluation_states, demonstrations, manifest = _manifest_paths(
         manifest_path
     )
+    cloning = config.get("behavior_cloning") or {}
+    if cloning.get("demonstrations"):
+        demonstrations = resolve_repo_path(
+            str(cloning["demonstrations"])
+        ).resolve()
+        if not demonstrations.is_file():
+            raise FileNotFoundError(demonstrations)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = args.run_root.expanduser().resolve() / f"{config['run_name']}_{timestamp}"
     run_dir.mkdir(parents=True, exist_ok=False)
@@ -248,7 +255,6 @@ def main() -> None:
             device=args.device,
             **ppo,
         )
-        cloning = config.get("behavior_cloning") or {}
         if cloning and not args.no_behavior_cloning:
             clone_metrics = behavior_clone(
                 model,
