@@ -84,6 +84,12 @@ uv run --no-sync python -m training_scripts.ram_player.evaluate_pickup_composite
   --video training_scripts/ram_runs/private/composite_race.mp4
 ```
 
+`--expert-lap 3` restricts the splice to the final lap. This is useful when a
+one-time pickup improves its own lap but changing the deterministic car state
+causes slower downstream laps.
+`--activation-distance` controls how late the expert takes over; a late splice
+can preserve more of the champion's fast approach line.
+
 Audit which raw button sequences produce score/boost changes from identical
 emulator states:
 

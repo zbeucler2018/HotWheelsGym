@@ -36,6 +36,18 @@ def _parser() -> argparse.ArgumentParser:
         default=61.0,
         help="progress where a learned expert returns control to the base policy",
     )
+    parser.add_argument(
+        "--expert-lap",
+        type=int,
+        choices=(1, 2, 3),
+        help="activate a learned expert only on this lap",
+    )
+    parser.add_argument(
+        "--activation-distance",
+        type=float,
+        default=24.0,
+        help="distance before the pickup where a learned expert takes control",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--video", type=Path)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -142,6 +154,8 @@ def main() -> None:
             base,
             expert,
             handoff_progress=args.handoff_progress,
+            target_lap=args.expert_lap,
+            activation_distance=args.activation_distance,
         )
 
     base_result = _evaluate(base, config, args.episodes)
@@ -155,6 +169,8 @@ def main() -> None:
         ),
         "feedback_controller": args.feedback_controller,
         "handoff_progress": args.handoff_progress,
+        "expert_lap": args.expert_lap,
+        "activation_distance": args.activation_distance,
         "episodes": args.episodes,
         "base": base_result,
         "composite": composite_result,

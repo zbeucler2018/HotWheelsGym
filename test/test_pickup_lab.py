@@ -187,6 +187,29 @@ class PickupLabTests(unittest.TestCase):
         action, _ = recovery_composite.predict(observation(101.0, pickup=False))
         np.testing.assert_array_equal(action, base.action)
 
+        final_lap_composite = PickupExpertCompositePolicy(
+            base,
+            expert,
+            handoff_progress=100.0,
+            target_lap=3,
+        )
+        action, _ = final_lap_composite.predict(observation(20.0))
+        np.testing.assert_array_equal(action, base.action)
+        final_lap_observation = observation(20.0)
+        final_lap_observation[SELF_LAP_INDEX] = 1.0
+        action, _ = final_lap_composite.predict(final_lap_observation)
+        np.testing.assert_array_equal(action, expert.action)
+
+        late_composite = PickupExpertCompositePolicy(
+            base,
+            expert,
+            activation_distance=10.0,
+        )
+        action, _ = late_composite.predict(observation(20.0, distance=20.0))
+        np.testing.assert_array_equal(action, base.action)
+        action, _ = late_composite.predict(observation(34.0, distance=9.0))
+        np.testing.assert_array_equal(action, expert.action)
+
     def test_task_rewards_pickup_and_terminates_after_hairpin_exit(self):
         env = DinoPickupHairpinTask(
             ScriptedPickupEnv(

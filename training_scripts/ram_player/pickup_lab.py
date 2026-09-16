@@ -282,10 +282,18 @@ class PickupExpertCompositePolicy:
         pickup_expert: Any,
         *,
         handoff_progress: float = float(DINO_HAIRPIN_END_PROGRESS),
+        target_lap: int | None = None,
+        activation_distance: float = 24.0,
     ) -> None:
+        if target_lap is not None and target_lap not in (1, 2, 3):
+            raise ValueError("target_lap must be 1, 2, 3, or None")
+        if activation_distance <= 0.0:
+            raise ValueError("activation_distance must be positive")
         self.base_policy = base_policy
         self.pickup_expert = pickup_expert
         self.handoff_progress = handoff_progress
+        self.target_lap = target_lap
+        self.activation_distance = activation_distance
         self._expert_active = False
         self._expert_acquired = False
 
@@ -329,10 +337,16 @@ class PickupExpertCompositePolicy:
                 self._expert_acquired = False
         if (
             not self._expert_active
+            and (
+                self.target_lap is None
+                or round(float(observation[SELF_LAP_INDEX]) * 2.0) + 1
+                == self.target_lap
+            )
             and progress < DINO_HAIRPIN_END_PROGRESS
             and float(observation[PICKUP_TYPE_INDEX]) > 0.5
             and float(observation[PICKUP_AVAILABLE_INDEX]) > 0.5
-            and float(observation[PICKUP_DISTANCE_INDEX]) <= 24.0 / 64.0
+            and float(observation[PICKUP_DISTANCE_INDEX])
+            <= self.activation_distance / 64.0
         ):
             self._expert_active = True
             self._expert_acquired = False
