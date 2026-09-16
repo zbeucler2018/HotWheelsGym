@@ -75,6 +75,14 @@ class NPCControlTests(unittest.TestCase):
                     memory.extract(configured, "<u4"),
                 )
 
+    def test_racer_y_is_read_as_a_signed_local_coordinate(self):
+        memory = state_memory(self.integration / "dino_boneyard_multi.state")
+        race = npc.RaceMemory(memory)
+        address = race.layout.racer(0).address + npc.RACER_Y_OFFSET
+        memory.assign(address, "<u4", 0xFFFFFFFF)
+
+        self.assertEqual(race.state(0).y, -1)
+
     def test_discovers_dino_power_ups_and_reads_live_availability(self):
         memory = state_memory(self.integration / "dino_boneyard_multi.state")
         addresses = npc.discover_power_up_addresses(memory)

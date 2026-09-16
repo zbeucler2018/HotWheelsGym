@@ -262,6 +262,22 @@ def validate_model_action_space(model: Any, path: str | Path) -> None:
         )
 
 
+def load_ram_policy(path: str | Path, *, device: str = "cpu") -> Any:
+    """Load any supported RAM checkpoint behind the current shared contract."""
+
+    resolved = resolve_repo_path(path).resolve()
+    if not resolved.is_file():
+        raise FileNotFoundError(resolved)
+    model = PPO.load(resolved, device=device)
+    if is_legacy_v5_policy(model):
+        return LegacyV5PolicyAdapter(model)
+    if is_legacy_v6_policy(model):
+        return LegacyV6PolicyAdapter(model)
+    validate_model_observation_space(model, resolved)
+    validate_model_action_space(model, resolved)
+    return model
+
+
 def prepare_rom(
     source_rom: Path, opponent_slots: tuple[int, ...], private_dir: Path
 ) -> Path:
@@ -345,10 +361,13 @@ class InitialStatePool(gym.Wrapper):
         state_paths: Sequence[str | None],
         *,
         seed: int,
+        selection: str = "random",
     ) -> None:
         super().__init__(env)
         if not state_paths:
             raise ValueError("initial state pool must not be empty")
+        if selection not in {"random", "cycle"}:
+            raise ValueError("initial state selection must be 'random' or 'cycle'")
         base = env.unwrapped
         default_state = bytes(base.initial_state)
         default_name = str(base.statename)
@@ -363,11 +382,18 @@ class InitialStatePool(gym.Wrapper):
             with gzip.open(path, "rb") as handle:
                 self._states.append((handle.read(), str(path)))
         self._random = random.Random(seed)
+        self._selection = selection
+        self._next_state = 0
 
     def reset(self, **kwargs: Any) -> tuple[Any, dict[str, Any]]:
         if kwargs.get("seed") is not None:
             self._random.seed(int(kwargs["seed"]))
-        state, name = self._random.choice(self._states)
+            self._next_state = 0
+        if self._selection == "cycle":
+            state, name = self._states[self._next_state]
+            self._next_state = (self._next_state + 1) % len(self._states)
+        else:
+            state, name = self._random.choice(self._states)
         base = self.env.unwrapped
         base.initial_state = state
         base.statename = name
@@ -385,6 +411,7 @@ def make_ram_env(
     opponent_league: Mapping[str, str] | None = None,
     state_path: str | None = None,
     state_paths: Sequence[str | None] | None = None,
+    state_pool_selection: str = "random",
     monitor_path: str | None = None,
     reward_config: Mapping[str, object] | None = None,
 ) -> gym.Env:
@@ -402,25 +429,20 @@ def make_ram_env(
         base.unwrapped.statename = str(state)
     env: gym.Env = base
     if state_paths:
-        env = InitialStatePool(env, state_paths, seed=seed)
+        env = InitialStatePool(
+            env,
+            state_paths,
+            seed=seed,
+            selection=state_pool_selection,
+        )
     if opponent_paths or opponent_league:
         models: dict[int, Any] = {}
         league_models: dict[str, Any] = {}
 
-        def load_policy(path: str) -> Any:
-            model = PPO.load(path, device="cpu")
-            if is_legacy_v5_policy(model):
-                return LegacyV5PolicyAdapter(model)
-            if is_legacy_v6_policy(model):
-                return LegacyV6PolicyAdapter(model)
-            validate_model_observation_space(model, path)
-            validate_model_action_space(model, path)
-            return model
-
         for slot, path in (opponent_paths or {}).items():
-            models[int(slot)] = load_policy(path)
+            models[int(slot)] = load_ram_policy(path)
         for label, path in (opponent_league or {}).items():
-            league_models[str(label)] = load_policy(path)
+            league_models[str(label)] = load_ram_policy(path)
         env = DinoRAMModelOpponentEnv(
             env,
             models,

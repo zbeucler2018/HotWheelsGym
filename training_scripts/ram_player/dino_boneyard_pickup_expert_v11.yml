@@ -1,0 +1,56 @@
+run_name: dino_ram_pickup_hairpin_expert_v11
+
+# This is a seconds-long skill task, not another full-race fine-tune. Generated
+# savestates and demonstrations remain private/ignored because they contain
+# emulator state derived from the user's ROM.
+pickup_state_manifest: training_scripts/ram_runs/private/dino_pickup_lab/manifest.json
+total_timesteps: 150000
+num_envs: 3
+seed: 2030
+
+environment: HWSTC-dino_boneyard-multi-3
+frame_skip: 4
+max_episode_steps: 300
+evaluation_max_episode_steps: 300
+
+opponents: {}
+opponent_league: {}
+training_states: []
+
+pickup_task:
+  max_start_distance: 34.0
+  miss_margin: 2.0
+  progress_scale: 0.25
+  frame_cost: 0.05
+  lateral_error_penalty: 0.05
+  wall_penalty: 0.25
+  respawn_penalty: 100.0
+  miss_penalty: 50.0
+  timeout_penalty: 75.0
+  pickup_bonus: 100.0
+  exit_bonus: 25.0
+  exit_speed_scale: 10.0
+
+behavior_cloning:
+  epochs: 30
+  batch_size: 256
+  learning_rate: 0.0003
+
+eval_every_timesteps: 25000
+eval_episodes: 1
+checkpoint_every_timesteps: 25000
+record_video: false
+
+ppo:
+  learning_rate: 0.0003
+  n_steps: 512
+  batch_size: 256
+  n_epochs: 10
+  gamma: 0.98
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  policy_layers: [128, 128]
+  value_layers: [128, 128]

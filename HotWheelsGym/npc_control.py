@@ -19,6 +19,7 @@ RACER_CURRENT_HEADING_OFFSET = 0xDE
 RACER_SPEED_OFFSET = 0xE8
 RACER_BOOST_OFFSET = 0xF0
 RACER_X_OFFSET = 0xF8
+RACER_Y_OFFSET = 0xFC
 RACER_Z_OFFSET = 0x100
 RACER_PROGRESS_OFFSET = 0x148
 RACER_POWER_UP_TYPE_OFFSET = 0x14D
@@ -107,6 +108,7 @@ class RacerState:
     progress: int
     x: int
     z: int
+    y: int = 0
     boost: int = 0
     power_up_type: int = 0xFF
     power_up_timer: int = 0
@@ -295,6 +297,7 @@ class RaceMemory:
             boost=_read_u32(self.memory, racer.address + RACER_BOOST_OFFSET),
             progress=_read_u16(self.memory, racer.address + RACER_PROGRESS_OFFSET),
             x=_signed_u32(_read_u32(self.memory, racer.address + RACER_X_OFFSET)),
+            y=_signed_u32(_read_u32(self.memory, racer.address + RACER_Y_OFFSET)),
             z=_signed_u32(_read_u32(self.memory, racer.address + RACER_Z_OFFSET)),
             power_up_type=_read_u8(
                 self.memory, racer.address + RACER_POWER_UP_TYPE_OFFSET

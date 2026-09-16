@@ -153,6 +153,7 @@ def _state_info(
         f"{prefix}lap": min(progress.current_lap(slot, state), total_laps),
         f"{prefix}rank": progress.rank(slot, states),
         f"{prefix}speed": state.speed,
+        f"{prefix}y": state.y,
         f"{prefix}boost": state.boost,
         f"{prefix}power_up_type": state.power_up_type,
         f"{prefix}jet_boost_remaining": state.jet_boost_remaining,
@@ -299,6 +300,8 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         self._lap_timing: LapSplitTracker | None = None
         self._player_respawn_pending = False
         self._jet_boost_pickups = 0
+        self._previous_score = 0
+        self._score_gained = 0
         self._hairpin = DinoHairpinTelemetry()
         self._sectors: DinoSectorTelemetry | None = None
         self._track_pose: DinoTrackPose | None = None
@@ -364,6 +367,8 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         )
         self._player_respawn_pending = self._race.respawn_pending(0)
         self._jet_boost_pickups = 0
+        self._previous_score = int(info.get("score", 0))
+        self._score_gained = 0
         self._hairpin = DinoHairpinTelemetry()
         self._sectors = DinoSectorTelemetry.start(
             self._states[0], self.progress_tracker.current_lap(0, self._states[0])
@@ -405,6 +410,9 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         info["ram_player_boost_active"] = False
         info["ram_player_jet_boost_acquired"] = False
         info["ram_player_jet_boost_pickups"] = 0
+        info["ram_player_score"] = self._previous_score
+        info["ram_player_score_delta"] = 0
+        info["ram_player_score_gained"] = 0
         return self._observation(), info
 
     def step(self, action: Any) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
@@ -428,6 +436,10 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         )
         _, _, terminated, truncated, info = self.env.step(native_action)
         self._raw_frame += 1
+        current_score = int(info.get("score", self._previous_score))
+        score_delta = current_score - self._previous_score
+        self._score_gained += score_delta
+        self._previous_score = current_score
 
         current_states = read_racer_states(self._race)
         self._power_up_addresses, current_power_ups = _read_or_discover_dino_power_ups(
@@ -596,6 +608,9 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         info["ram_player_boost_active"] = boost.active
         info["ram_player_jet_boost_acquired"] = jet_boost_acquired
         info["ram_player_jet_boost_pickups"] = self._jet_boost_pickups
+        info["ram_player_score"] = current_score
+        info["ram_player_score_delta"] = score_delta
+        info["ram_player_score_gained"] = self._score_gained
         info.update(_power_up_radar_info("ram_player_", radar))
         info["ram_player_power_up_approach_delta"] = power_up_approach_delta
         info["ram_player_jet_boost_approach_frames"] = self._jet_boost_approach_frames
@@ -635,7 +650,9 @@ class RAMActionRepeat(gym.Wrapper):
         jet_boost_frames = 0
         jet_boost_pickups = 0
         skid_frames = 0
+        continuous_progress_delta = 0.0
         relative_progress_delta = 0.0
+        score_delta = 0
         opponents_finished = 0
         won = False
         observation: Any = None
@@ -657,9 +674,13 @@ class RAMActionRepeat(gym.Wrapper):
             jet_boost_frames += int(bool(info["ram_player_jet_boost_active"]))
             jet_boost_pickups += int(bool(info["ram_player_jet_boost_acquired"]))
             skid_frames += int(bool(info["ram_player_skid_active"]))
+            continuous_progress_delta += float(
+                info.get("ram_player_continuous_progress_delta", 0.0)
+            )
             relative_progress_delta += float(
                 info.get("ram_player_relative_progress_delta", 0.0)
             )
+            score_delta += int(info.get("ram_player_score_delta", 0))
             opponents_finished += int(info.get("ram_player_opponents_finished_now", 0))
             won = won or bool(info.get("ram_player_won_now", False))
             frames += 1
@@ -681,7 +702,9 @@ class RAMActionRepeat(gym.Wrapper):
         info["ram_decision_jet_boost_frames"] = jet_boost_frames
         info["ram_decision_jet_boost_pickups"] = jet_boost_pickups
         info["ram_decision_skid_frames"] = skid_frames
+        info["ram_decision_continuous_progress_delta"] = continuous_progress_delta
         info["ram_decision_relative_progress_delta"] = relative_progress_delta
+        info["ram_decision_score_delta"] = score_delta
         info["ram_decision_opponents_finished"] = opponents_finished
         info["ram_decision_won"] = won
         sectors = getattr(self.env, "_sectors", None)
