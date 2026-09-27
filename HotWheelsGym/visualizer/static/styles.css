@@ -70,18 +70,27 @@ main { padding: 1rem clamp(.7rem, 2vw, 1.5rem) 2rem; max-width: 1600px; margin: 
 .frame-wrap { display: grid; place-items: center; min-height: 360px; padding: 1rem; background: #020607; }
 #game-frame { display: block; width: min(100%, 720px); max-height: 620px; height: auto; object-fit: contain; image-rendering: pixelated; }
 #geometry { display: block; width: 100%; height: 590px; background: #081218; }
-.geometry-layers { padding: .55rem 1rem; border-bottom: 1px solid var(--border); background: #0a171d; }
-.geometry-layers summary { cursor: pointer; color: var(--cyan); font-size: .78rem; user-select: none; }
-.geometry-layer-options { display: flex; flex-wrap: wrap; gap: .45rem .9rem; padding-top: .55rem; }
-.geometry-layer-options label { display: inline-flex; align-items: center; gap: .3rem; color: var(--muted); font-size: .72rem; white-space: nowrap; }
-.geometry-layer-options input { accent-color: var(--cyan); }
 .geometry-legend { display: flex; flex-wrap: wrap; gap: .8rem; padding: .6rem 1rem; color: var(--muted); font-size: .72rem; border-top: 1px solid var(--border); }
-.geometry-legend span::before { content: ""; display: inline-block; width: .7rem; height: .18rem; margin-right: .35rem; vertical-align: middle; background: currentColor; }
+.geometry-toggle { border: 0; padding: .15rem 0; background: transparent; color: inherit; font: inherit; cursor: pointer; transition: opacity .15s ease; }
+.geometry-toggle::before { content: ""; display: inline-block; width: .7rem; height: .18rem; margin-right: .35rem; vertical-align: middle; background: currentColor; }
+.geometry-toggle[aria-pressed="false"] { opacity: .32; text-decoration: line-through; }
+.geometry-toggle:focus-visible { outline: 1px solid currentColor; outline-offset: 3px; border-radius: .15rem; }
 .legend-controlled { color: var(--green); }
 .legend-track { color: var(--cyan); }
 .legend-tangent { color: var(--gold); }
+.legend-short { color: var(--blue); }
+.legend-medium { color: var(--purple); }
+.legend-long { color: #ff9f68; }
 .legend-nearby { color: var(--purple); }
 .legend-pickup { color: var(--red); }
+.legend-grid, .legend-labels { color: var(--muted); }
+
+.section-toggle { width: 100%; color: var(--text); background: transparent; cursor: pointer; font: inherit; text-align: left; }
+.section-toggle strong { font-size: 1rem; }
+.section-toggle strong::before { content: "▾"; display: inline-block; width: 1.1rem; color: var(--cyan); }
+.section-toggle[aria-expanded="false"] strong::before { content: "▸"; }
+.section-toggle:hover strong { color: var(--cyan); }
+[hidden] { display: none !important; }
 
 .history-panel, .observation-panel { margin-top: 1rem; }
 .history-grid { display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 1px; background: var(--border); }
@@ -112,8 +121,7 @@ main { padding: 1rem clamp(.7rem, 2vw, 1.5rem) 2rem; max-width: 1600px; margin: 
   .controls button { flex: 1 1 28%; min-width: 0; }
   main { padding-inline: .45rem; }
   .panel { border-radius: .45rem; }
-  .geometry-layers { padding-inline: .7rem; }
-  .geometry-layer-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .geometry-legend { gap: .55rem .8rem; }
   #geometry { height: 460px; }
   .history-grid, .observation-groups { grid-template-columns: 1fr; }
   .frame-wrap { min-height: 210px; padding: .5rem; }

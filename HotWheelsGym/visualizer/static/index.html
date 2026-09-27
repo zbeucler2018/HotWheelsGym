@@ -55,36 +55,27 @@
           <h2>RAM-derived local geometry</h2>
           <span id="progress-index">Reference 0</span>
         </div>
-        <details class="geometry-layers" open>
-          <summary>Geometry layers</summary>
-          <div class="geometry-layer-options">
-            <label><input type="checkbox" data-geometry-layer="grid" checked> Grid</label>
-            <label><input type="checkbox" data-geometry-layer="centerline" checked> Centerline</label>
-            <label><input type="checkbox" data-geometry-layer="pose" checked> Pose vectors</label>
-            <label><input type="checkbox" data-geometry-layer="short" checked> Short target</label>
-            <label><input type="checkbox" data-geometry-layer="medium" checked> Medium target</label>
-            <label><input type="checkbox" data-geometry-layer="long" checked> Long target</label>
-            <label><input type="checkbox" data-geometry-layer="racers" checked> Nearby racers</label>
-            <label><input type="checkbox" data-geometry-layer="pickup" checked> Pickup</label>
-            <label><input type="checkbox" data-geometry-layer="overlays" checked> Labels + metrics</label>
-          </div>
-        </details>
         <canvas id="geometry" aria-label="Player-centric RAM-derived track geometry"></canvas>
-        <div class="geometry-legend" aria-label="Geometry legend">
-          <span class="legend-controlled">controlled</span>
-          <span class="legend-track">centerline</span>
-          <span class="legend-tangent">tangent</span>
-          <span class="legend-nearby">nearby racers</span>
-          <span class="legend-pickup">pickup</span>
+        <div class="geometry-legend" aria-label="Toggle geometry layers">
+          <button class="geometry-toggle legend-controlled" data-geometry-layer="controlled" aria-pressed="true">controlled</button>
+          <button class="geometry-toggle legend-track" data-geometry-layer="centerline" aria-pressed="true">centerline</button>
+          <button class="geometry-toggle legend-tangent" data-geometry-layer="pose" aria-pressed="true">tangent + lateral</button>
+          <button class="geometry-toggle legend-short" data-geometry-layer="short" aria-pressed="true">short target</button>
+          <button class="geometry-toggle legend-medium" data-geometry-layer="medium" aria-pressed="true">medium target</button>
+          <button class="geometry-toggle legend-long" data-geometry-layer="long" aria-pressed="true">long target</button>
+          <button class="geometry-toggle legend-nearby" data-geometry-layer="racers" aria-pressed="true">nearby racers</button>
+          <button class="geometry-toggle legend-pickup" data-geometry-layer="pickup" aria-pressed="true">pickup</button>
+          <button class="geometry-toggle legend-grid" data-geometry-layer="grid" aria-pressed="true">grid</button>
+          <button class="geometry-toggle legend-labels" data-geometry-layer="overlays" aria-pressed="true">labels + metrics</button>
         </div>
       </article>
     </section>
 
     <section class="panel history-panel">
-      <div class="panel-heading">
-        <h2>Rolling history</h2>
+      <button id="history-toggle" class="panel-heading section-toggle" type="button" aria-expanded="true" aria-controls="history-grid">
+        <strong>Rolling history</strong>
         <span>last 500 frames</span>
-      </div>
+      </button>
       <div id="history-grid" class="history-grid"></div>
     </section>
 

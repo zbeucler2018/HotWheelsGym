@@ -62,7 +62,8 @@ clocked by the Python server at 60 raw frames/second for 1x speed. A same-origin
 WebSocket streams framebuffer updates at up to the game's 30 FPS while sending
 the heavier semantic observation/geometry payload at 2 Hz, so Tailnet latency
 does not clock the emulator or force a full diagnostic redraw for every frame.
-Geometry layers can be toggled independently in the browser, and those choices
-are retained locally across reloads.
+Geometry layers are toggled by tapping their colored legend entries, and the
+Rolling history heading collapses that section. Those choices are retained
+locally across reloads.
 Attaching to
 an independently running environment is not currently implemented.

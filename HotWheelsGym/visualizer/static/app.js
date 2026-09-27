@@ -14,6 +14,7 @@ const ui = {
   progressIndex: document.getElementById("progress-index"),
   geometry: document.getElementById("geometry"),
   history: document.getElementById("history-grid"),
+  historyToggle: document.getElementById("history-toggle"),
   groups: document.getElementById("observation-groups"),
   observationCount: document.getElementById("observation-count"),
   valueTemplate: document.getElementById("value-row-template"),
@@ -26,13 +27,13 @@ let playTimer = null;
 let stream = null;
 let streamConnected = false;
 let frameObjectUrl = null;
-const geometryLayerInputs = [...document.querySelectorAll("[data-geometry-layer]")];
+const geometryLayerControls = [...document.querySelectorAll("[data-geometry-layer]")];
 
 try {
   const savedLayers = JSON.parse(localStorage.getItem("hotwheels-geometry-layers") || "{}");
-  for (const input of geometryLayerInputs) {
-    if (typeof savedLayers[input.dataset.geometryLayer] === "boolean") {
-      input.checked = savedLayers[input.dataset.geometryLayer];
+  for (const control of geometryLayerControls) {
+    if (typeof savedLayers[control.dataset.geometryLayer] === "boolean") {
+      control.setAttribute("aria-pressed", String(savedLayers[control.dataset.geometryLayer]));
     }
   }
 } catch (_) {
@@ -40,18 +41,32 @@ try {
 }
 
 function geometryLayerEnabled(name) {
-  return document.querySelector(`[data-geometry-layer="${name}"]`)?.checked ?? true;
+  return document.querySelector(`[data-geometry-layer="${name}"]`)?.getAttribute("aria-pressed") !== "false";
 }
 
-for (const input of geometryLayerInputs) {
-  input.addEventListener("change", () => {
+for (const control of geometryLayerControls) {
+  control.addEventListener("click", () => {
+    control.setAttribute("aria-pressed", String(!geometryLayerEnabled(control.dataset.geometryLayer)));
     const settings = Object.fromEntries(
-      geometryLayerInputs.map(item => [item.dataset.geometryLayer, item.checked]),
+      geometryLayerControls.map(item => [item.dataset.geometryLayer, geometryLayerEnabled(item.dataset.geometryLayer)]),
     );
     try { localStorage.setItem("hotwheels-geometry-layers", JSON.stringify(settings)); } catch (_) {}
     if (current) renderGeometry(current);
   });
 }
+
+try {
+  if (localStorage.getItem("hotwheels-history-expanded") === "false") {
+    ui.historyToggle.setAttribute("aria-expanded", "false");
+    ui.history.hidden = true;
+  }
+} catch (_) {}
+ui.historyToggle.addEventListener("click", () => {
+  const expanded = ui.historyToggle.getAttribute("aria-expanded") !== "true";
+  ui.historyToggle.setAttribute("aria-expanded", String(expanded));
+  ui.history.hidden = !expanded;
+  try { localStorage.setItem("hotwheels-history-expanded", String(expanded)); } catch (_) {}
+});
 
 function setStatus(text, error = false) {
   ui.status.textContent = text;
@@ -163,7 +178,7 @@ function renderGeometry(snapshot) {
   }
   if (geometryLayerEnabled("pose")) points.push(geometry.projected_point);
   if (geometryLayerEnabled("pickup")) points.push(geometry.pickup.point);
-  if (geometryLayerEnabled("racers")) points.push(...snapshot.racers.map(racer => racer.local));
+  if (geometryLayerEnabled("racers")) points.push(...snapshot.racers.filter(racer => !racer.controlled).map(racer => racer.local));
   const maxMagnitude = Math.max(3, ...points.flatMap(point => [Math.abs(point.right), Math.abs(point.forward)]));
   const scale = Math.min(width, height) * .42 / (maxMagnitude * 1.08);
   const origin = { x: width / 2, y: height / 2 };
@@ -220,6 +235,7 @@ function renderGeometry(snapshot) {
 
   const nearbyCallouts = [];
   for (const racer of snapshot.racers) {
+    if (racer.controlled && !geometryLayerEnabled("controlled")) continue;
     if (!racer.controlled && !geometryLayerEnabled("racers")) continue;
     const point = screen(racer.local);
     const color = racer.controlled ? "#6ce59b" : "#be95ff";
@@ -240,7 +256,7 @@ function renderGeometry(snapshot) {
     }
   }
 
-  if (geometryLayerEnabled("pose")) {
+  if (geometryLayerEnabled("controlled")) {
     drawArrow(context, origin, { x: origin.x, y: origin.y - 62 }, "#6ce59b", geometryLayerEnabled("overlays") ? "forward" : "");
     drawArrow(context, origin, { x: origin.x + 62, y: origin.y }, "#4ad7e8", geometryLayerEnabled("overlays") ? "right" : "");
   }
