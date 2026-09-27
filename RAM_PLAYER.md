@@ -337,6 +337,25 @@ layers with zero-weight columns. That migration is lossless—the starting v7
 policy produces exactly the same actions as its v6 source until learning uses
 the radar. Other tracks' power-up layouts still need a portability audit.
 
+### Non-Dino observation profiles
+
+The same 67-value observation is now available through
+`build_selected_track_ram_observation(..., track=<Tracks value>)` for all
+bundled multiplayer tracks. Its player and three-nearby-racer fields are the
+same shared racer-object telemetry as Dino; the 11 road features and five
+pickup-radar fields are selected from a per-track reference profile. Each
+profile uses the documented checkpoints-per-lap count from `readme.md`, median
+X/Z positions from all three stock NPCs in the unchanged multi/3-NPC mode, and
+the live native pickup objects at race start. Short unobserved coordinate runs
+are linearly interpolated and recorded in the generated profile data.
+
+`DinoRAMPlayerEnv` intentionally remains Dino-only: its reward, hairpin
+diagnostics, sectors, and evaluation labels are Dino-specific. Broadening that
+training environment would change the reward/curriculum, which this observation
+portability work deliberately does not do. A future generic trainer should use
+the new selected-observation builder while defining a separately validated
+cross-track reward and evaluation plan.
+
 The legacy v6 reward remains progress-dominant and finish-aware. Small shaping
 penalties discourage wall contact, large centerline error, wrong-way alignment,
 and a Player 1 respawn. Evaluation logs mean lateral error, heading alignment,

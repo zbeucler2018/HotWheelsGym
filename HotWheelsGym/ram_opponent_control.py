@@ -23,6 +23,7 @@ from .dino_boneyard_track import (
     dino_continuous_progress_delta,
     dino_track_pose,
 )
+from .enums import Tracks
 from .npc_control import (
     HEADING_PERIOD,
     MAX_JET_BOOST_TIMER,
@@ -35,6 +36,14 @@ from .npc_control import (
     RacerState,
     heading_delta,
     progress_delta,
+)
+from .track_reference import (
+    TrackPose,
+    TrackReferenceProfile,
+    continuous_progress_delta as track_continuous_progress_delta,
+    next_power_up_radar as track_next_power_up_radar,
+    track_reference_profile,
+    track_pose as non_dino_track_pose,
 )
 
 DINO_BONEYARD_PROGRESS_COUNT = 342
@@ -830,6 +839,173 @@ def build_dino_ram_observation(
             f"expected {expected_size}"
         )
     return tuple(features)
+
+
+def build_track_ram_observation(
+    states: Mapping[int, RacerState],
+    previous_states: Mapping[int, RacerState],
+    progress: RaceProgressTracker,
+    controlled_slot: int,
+    previous_action: object,
+    *,
+    profile: TrackReferenceProfile,
+    total_laps: int = 3,
+    track_pose: TrackPose | None = None,
+    power_ups: tuple[PowerUpState, ...] | None = None,
+    include_continuous_progress_rate: bool = False,
+) -> tuple[float, ...]:
+    """Build the existing 67-D contract on a validated non-Dino profile.
+
+    Field order, scaling, nearby-racer ordering, and action history are identical
+    to :func:`build_dino_ram_observation`.  Only the source of the 11
+    track-relative values and five pickup-radar values changes by course.
+    """
+
+    if set(states) != set(previous_states):
+        raise ValueError("current and previous racer slots differ")
+    if progress.progress_count != profile.progress_count:
+        raise ValueError(
+            f"progress tracker count {progress.progress_count} does not match "
+            f"{profile.track.value} ({profile.progress_count})"
+        )
+    if total_laps <= 0:
+        raise ValueError("total_laps must be positive")
+
+    action_components = normalize_racer_action(previous_action)
+    state = states[controlled_slot]
+    previous = previous_states[controlled_slot]
+    heading = _heading_pair(state.current_heading)
+    track_phase = _heading_pair(
+        round((state.progress / progress.progress_count) * HEADING_PERIOD)
+    )
+    lap_value = _clip(
+        (progress.current_lap(controlled_slot, state) - 1) / max(1, total_laps - 1),
+        0.0,
+        1.0,
+    )
+    rank_value = _clip((progress.rank(controlled_slot, states) - 1) / 3.0, 0.0, 1.0)
+    advance = progress_delta(previous.progress, state.progress, progress.progress_count)
+    pose = track_pose or non_dino_track_pose(profile, state)
+
+    features: list[float] = [
+        *heading,
+        _clip((state.x - DINO_POSITION_CENTER) / DINO_POSITION_SCALE),
+        _clip((state.z - DINO_POSITION_CENTER) / DINO_POSITION_SCALE),
+        _clip(state.speed / RAM_SPEED_SCALE, 0.0, 1.0),
+        _clip(state.boost / MAX_BOOST_CHARGE, 0.0, 1.0),
+        _clip(state.jet_boost_remaining / MAX_JET_BOOST_TIMER, 0.0, 1.0),
+        float(state.skid_active),
+        *track_phase,
+        lap_value,
+        rank_value,
+        _clip((state.speed - previous.speed) / SPEED_DELTA_SCALE),
+        _clip(heading_delta(state.current_heading, previous.current_heading) / 0x200),
+        _clip(advance / 4.0),
+        *pose.features,
+        *(
+            1.0 if index == selected else 0.0
+            for selected, size in zip(action_components, RAM_ACTION_COMPONENT_SIZES)
+            for index in range(size)
+        ),
+    ]
+
+    angle = _angle(state.current_heading)
+    forward_x, forward_z = sin(angle), cos(angle)
+    right_x, right_z = cos(angle), -sin(angle)
+    own_total = progress.total_progress(controlled_slot, state)
+    for other_slot in _ordered_other_slots(controlled_slot, states, progress):
+        other = states[other_slot]
+        dx = other.x - state.x
+        dz = other.z - state.z
+        relative_heading = _heading_pair(
+            heading_delta(other.current_heading, state.current_heading)
+        )
+        relative_progress = progress.total_progress(other_slot, other) - own_total
+        features.extend(
+            (
+                _clip((dx * forward_x + dz * forward_z) / RELATIVE_POSITION_SCALE),
+                _clip((dx * right_x + dz * right_z) / RELATIVE_POSITION_SCALE),
+                _clip(hypot(dx, dz) / RELATIVE_POSITION_SCALE, 0.0, 1.0),
+                _clip(relative_progress / max(1.0, progress.progress_count / 2.0)),
+                _clip((other.speed - state.speed) / RAM_SPEED_SCALE),
+                _clip(other.boost / MAX_BOOST_CHARGE, 0.0, 1.0),
+                *relative_heading,
+                _clip(
+                    (
+                        progress.current_lap(other_slot, other)
+                        - progress.current_lap(controlled_slot, state)
+                    )
+                    / max(1, total_laps)
+                ),
+            )
+        )
+
+    features.extend(track_next_power_up_radar(profile, pose, power_ups).features)
+    if include_continuous_progress_rate:
+        previous_pose = non_dino_track_pose(profile, previous)
+        features.append(
+            _clip(
+                track_continuous_progress_delta(
+                    profile,
+                    previous_pose,
+                    pose,
+                    native_advance=advance,
+                )
+                / 2.0
+            )
+        )
+    expected_size = dino_ram_observation_size(
+        include_continuous_progress_rate=include_continuous_progress_rate
+    )
+    if len(features) != expected_size:
+        raise RuntimeError(
+            f"RAM observation has {len(features)} values, expected {expected_size}"
+        )
+    return tuple(features)
+
+
+def build_selected_track_ram_observation(
+    states: Mapping[int, RacerState],
+    previous_states: Mapping[int, RacerState],
+    progress: RaceProgressTracker,
+    controlled_slot: int,
+    previous_action: object,
+    *,
+    track: Tracks | str,
+    total_laps: int = 3,
+    power_ups: tuple[PowerUpState, ...] | None = None,
+    include_continuous_progress_rate: bool = False,
+) -> tuple[float, ...]:
+    """Select Dino or a validated non-Dino profile without changing the vector.
+
+    The existing Dino environment continues to call its dedicated builder so its
+    reward and evaluation behavior are bit-for-bit unchanged.  This selector is
+    the shared observation entry point for another multi-race track.
+    """
+
+    selected = Tracks(track)
+    if selected is Tracks.Dino_Boneyard:
+        return build_dino_ram_observation(
+            states,
+            previous_states,
+            progress,
+            controlled_slot,
+            previous_action,
+            total_laps=total_laps,
+            power_ups=power_ups,
+            include_continuous_progress_rate=include_continuous_progress_rate,
+        )
+    return build_track_ram_observation(
+        states,
+        previous_states,
+        progress,
+        controlled_slot,
+        previous_action,
+        profile=track_reference_profile(selected),
+        total_laps=total_laps,
+        power_ups=power_ups,
+        include_continuous_progress_rate=include_continuous_progress_rate,
+    )
 
 
 def race_reward(

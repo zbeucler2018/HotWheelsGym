@@ -29,6 +29,7 @@ def load_module(name: str, filename: str):
 npc = load_module("npc_control", "npc_control.py")
 ram = load_module("ram_opponent_control", "ram_opponent_control.py")
 track = sys.modules[f"{PACKAGE_NAME}.dino_boneyard_track"]
+track_reference = sys.modules[f"{PACKAGE_NAME}.track_reference"]
 wrappers = load_module("RAMOpponent", "RAMOpponent.py")
 
 
@@ -80,6 +81,38 @@ class RAMPlayerControlTests(unittest.TestCase):
                 self.assertEqual(ram.DINO_RAM_OBSERVATION_SIZE, 67)
                 self.assertEqual(len(observation), len(ram.RAM_OBSERVATION_NAMES))
                 self.assertTrue(all(-1.0 <= value <= 1.0 for value in observation))
+
+    def test_non_dino_profiles_preserve_the_67d_contract_for_every_racer(self):
+        integration = ROOT / "HotWheelsGym" / "HotWheelsStuntTrackChallenge-GbAdvance"
+        for track_name, profile in track_reference.TRACK_REFERENCE_PROFILES.items():
+            with self.subTest(track=track_name):
+                race = npc.RaceMemory(
+                    state_memory(integration / f"{track_name}_multi.state")
+                )
+                states = ram.read_racer_states(race)
+                tracker = ram.RaceProgressTracker.from_states(
+                    states, profile.progress_count
+                )
+                power_ups = npc.read_power_up_states(
+                    race.memory, npc.discover_power_up_addresses(race.memory)
+                )
+                self.assertEqual(len(profile.centerline), profile.progress_count)
+                self.assertTrue(profile.power_ups)
+                for slot in (0, 1, 2, 3):
+                    observation = ram.build_selected_track_ram_observation(
+                        states,
+                        states,
+                        tracker,
+                        slot,
+                        ram.RAM_DEFAULT_ACTION,
+                        track=track_name,
+                        power_ups=power_ups,
+                    )
+                    self.assertEqual(len(observation), 67)
+                    self.assertEqual(
+                        len(observation), len(ram.RAM_OBSERVATION_NAMES)
+                    )
+                    self.assertTrue(all(-1.0 <= value <= 1.0 for value in observation))
 
     def test_centerline_pose_is_zero_offset_at_reference_point(self):
         race = npc.RaceMemory(state_memory(self.state_path))
