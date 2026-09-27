@@ -22,6 +22,22 @@ python -m HotWheelsGym.visualizer \
   --state HotWheelsGym/HotWheelsStuntTrackChallenge-GbAdvance/trex_valley_multi.state
 ```
 
+Let a compatible 67-D PPO checkpoint drive Player 1 while you inspect it:
+
+```bash
+python -m HotWheelsGym.visualizer \
+  --track dino_boneyard \
+  --model training_scripts/ram_runs/dino_ram_player_power_up_radar_v10_20260915T132334Z/evaluation/best_model.zip \
+  --model-action-repeat 4 \
+  --host 0.0.0.0 \
+  --port 8765
+```
+
+The model always drives native racer slot 0. The controlled-slot selector only
+changes which racer's semantically equivalent observation and geometry are
+displayed. Model loading remains optional and Stable-Baselines3 is imported
+only when `--model` is supplied.
+
 Open `http://<device-tailscale-ip>:8765/` from another device on the same
 tailnet. The service has no authentication of its own, so keep it on a trusted
 local or Tailscale interface and do not expose the port through a public tunnel.

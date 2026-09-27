@@ -69,9 +69,14 @@ class FakeMultiEnv:
         self.data = FakeData(state_memory(track))
         self.buttons = ["A", "B", "SELECT", "START", "RIGHT", "LEFT", "UP", "DOWN", "R", "L"]
         self.frame = np.zeros((160, 240, 3), dtype=np.uint8)
+        self.actions = []
 
     def reset(self):
         return self.frame.copy(), {}
+
+    def step(self, action):
+        self.actions.append(tuple(action))
+        return self.frame.copy(), 0.0, False, False, {}
 
     def close(self):
         pass
@@ -204,6 +209,52 @@ print(json.dumps({
         self.assertTrue(encoded.startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertIn(b"IHDR", encoded)
         self.assertTrue(encoded.endswith(b"IEND\xaeB`\x82"))
+
+    def test_optional_policy_receives_exact_67d_observation_and_repeats_action(self):
+        class FakePolicy:
+            def __init__(self):
+                self.observations = []
+                self.reset_count = 0
+                self.assert_deterministic = False
+
+            def reset(self):
+                self.reset_count += 1
+
+            def predict(self, observation, deterministic):
+                self.observations.append(np.asarray(observation).copy())
+                self.assert_deterministic = deterministic
+                return np.asarray([1, 2, 1]), None
+
+        env = FakeMultiEnv(Tracks.Dino_Boneyard)
+        policy = FakePolicy()
+        adapter = ObservationVisualizerAdapter(
+            env,
+            policy=policy,
+            policy_name="test policy",
+            policy_action_repeat=4,
+        )
+        initial = adapter.reset()
+        result = adapter.step(5)
+
+        self.assertEqual(policy.reset_count, 1)
+        self.assertEqual(len(policy.observations), 2)
+        self.assertEqual(policy.observations[0].shape, (67,))
+        np.testing.assert_array_equal(
+            policy.observations[0],
+            np.asarray(initial.observation_values, dtype=np.float32),
+        )
+        self.assertTrue(policy.assert_deterministic)
+        expected_buttons = tuple(
+            name in {"A", "RIGHT", "L", "R"} for name in env.buttons
+        )
+        self.assertEqual(env.actions, [expected_buttons] * 5)
+        self.assertTrue(result.metadata["policy_enabled"])
+        self.assertEqual(result.metadata["policy_action"], [1, 2, 1])
+        self.assertEqual(result.metadata["policy_action_repeat"], 4)
+        named = result.named_observation
+        self.assertEqual(named["previous_drive_accelerate"], 1.0)
+        self.assertEqual(named["previous_steering_right"], 1.0)
+        self.assertEqual(named["previous_boost_on"], 1.0)
 
 
 if __name__ == "__main__":

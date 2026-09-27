@@ -32,7 +32,9 @@ from ..ram_opponent_control import (
     RaceProgressTracker,
     build_dino_ram_observation,
     build_track_ram_observation,
+    normalize_racer_action,
     ordered_other_slots,
+    player_buttons_from_action,
     read_racer_states,
 )
 from ..track_reference import (
@@ -156,6 +158,7 @@ def _build_semantic_snapshot(
     revision: int,
     state_name: str,
     history: Mapping[str, tuple[float, ...]],
+    runtime_metadata: Mapping[str, Any] | None = None,
 ) -> VisualizerSnapshot:
     state = states[controlled_slot]
     progress_count, centerline, lookaheads, pose, radar, profile = _track_components(
@@ -294,6 +297,7 @@ def _build_semantic_snapshot(
         "total_laps": total_laps,
         "nearby_order_semantics": "absolute race-progress distance, then slot",
         "frame_shape": list(framebuffer.shape),
+        **(runtime_metadata or {}),
     }
     return VisualizerSnapshot(
         revision=revision,
@@ -323,6 +327,9 @@ class ObservationVisualizerAdapter:
         controlled_slot: int = 0,
         state_path: str | Path | None = None,
         history_length: int = HISTORY_LENGTH,
+        policy: Any | None = None,
+        policy_name: str | None = None,
+        policy_action_repeat: int = 4,
     ) -> None:
         self.env = env
         self.base = _base_env(env)
@@ -335,6 +342,11 @@ class ObservationVisualizerAdapter:
         self.state_path = Path(state_path).expanduser().resolve() if state_path else None
         if self.state_path and not self.state_path.is_file():
             raise FileNotFoundError(self.state_path)
+        if policy_action_repeat < 1:
+            raise ValueError("policy_action_repeat must be at least one")
+        self.policy = policy
+        self.policy_name = policy_name or ("loaded policy" if policy is not None else None)
+        self.policy_action_repeat = policy_action_repeat
         self._history = {
             name: deque(maxlen=history_length) for name in HISTORY_NAMES
         }
@@ -348,6 +360,9 @@ class ObservationVisualizerAdapter:
         self._snapshot: VisualizerSnapshot | None = None
         self._raw_frame = 0
         self._revision = 0
+        self._previous_action = RAM_DEFAULT_ACTION
+        self._current_action = RAM_DEFAULT_ACTION
+        self._policy_frames_remaining = 0
 
     @property
     def progress_count(self) -> int:
@@ -379,6 +394,12 @@ class ObservationVisualizerAdapter:
         )
         self._framebuffer = np.asarray(frame)
         self._raw_frame = 0
+        self._previous_action = RAM_DEFAULT_ACTION
+        self._current_action = RAM_DEFAULT_ACTION
+        self._policy_frames_remaining = 0
+        reset_policy = getattr(self.policy, "reset", None)
+        if callable(reset_policy):
+            reset_policy()
         for values in self._history.values():
             values.clear()
         return self._refresh()
@@ -396,10 +417,18 @@ class ObservationVisualizerAdapter:
             raise RuntimeError("call reset() before step()")
         if not 1 <= frames <= 600:
             raise ValueError("frames must be in 1..600")
-        action = tuple(False for _ in self.base.buttons)
         for _ in range(frames):
+            if self.policy is not None and self._policy_frames_remaining == 0:
+                self._current_action = self._predict_policy_action()
+                self._policy_frames_remaining = self.policy_action_repeat
+            if self.policy is None:
+                buttons = tuple(False for _ in self.base.buttons)
+            else:
+                buttons = player_buttons_from_action(
+                    self._current_action, self.base.buttons
+                )
             previous = self._states
-            frame, _, terminated, truncated, _ = self.env.step(action)
+            frame, _, terminated, truncated, _ = self.env.step(buttons)
             current = read_racer_states(self._race)
             self._progress.update(current)
             self._previous_states = previous
@@ -409,11 +438,46 @@ class ObservationVisualizerAdapter:
             )
             self._framebuffer = np.asarray(frame)
             self._raw_frame += 1
+            if self.policy is not None:
+                self._previous_action = self._current_action
+                self._policy_frames_remaining -= 1
             self._refresh()
             if terminated or truncated:
                 break
         assert self._snapshot is not None
         return self._snapshot
+
+    def _predict_policy_action(self) -> tuple[int, int, int]:
+        """Predict one Player 1 action from the exact canonical observation."""
+
+        if (
+            self.policy is None
+            or self._states is None
+            or self._previous_states is None
+            or self._progress is None
+            or self._framebuffer is None
+        ):
+            raise RuntimeError("call reset() before requesting a policy action")
+        policy_snapshot = _build_semantic_snapshot(
+            framebuffer=self._framebuffer,
+            track=self.track,
+            controlled_slot=0,
+            states=self._states,
+            previous_states=self._previous_states,
+            progress=self._progress,
+            power_ups=self._power_ups,
+            previous_action=self._previous_action,
+            total_laps=int(self.base.total_laps),
+            raw_frame=self._raw_frame,
+            revision=self._revision,
+            state_name=str(self.base.statename),
+            history={},
+        )
+        action, _ = self.policy.predict(
+            np.asarray(policy_snapshot.observation_values, dtype=np.float32),
+            deterministic=True,
+        )
+        return normalize_racer_action(action)
 
     def _refresh(self) -> VisualizerSnapshot:
         if (
@@ -432,12 +496,13 @@ class ObservationVisualizerAdapter:
             previous_states=self._previous_states,
             progress=self._progress,
             power_ups=self._power_ups,
-            previous_action=RAM_DEFAULT_ACTION,
+            previous_action=self._previous_action,
             total_laps=int(self.base.total_laps),
             raw_frame=self._raw_frame,
             revision=self._revision,
             state_name=str(self.base.statename),
             history={name: tuple(values) for name, values in self._history.items()},
+            runtime_metadata=self._runtime_metadata(),
         )
         named = snapshot.named_observation
         for name, values in self._history.items():
@@ -450,14 +515,26 @@ class ObservationVisualizerAdapter:
             previous_states=self._previous_states,
             progress=self._progress,
             power_ups=self._power_ups,
-            previous_action=RAM_DEFAULT_ACTION,
+            previous_action=self._previous_action,
             total_laps=int(self.base.total_laps),
             raw_frame=self._raw_frame,
             revision=self._revision,
             state_name=str(self.base.statename),
             history={name: tuple(values) for name, values in self._history.items()},
+            runtime_metadata=self._runtime_metadata(),
         )
         return self._snapshot
+
+    def _runtime_metadata(self) -> dict[str, Any]:
+        return {
+            "policy_enabled": self.policy is not None,
+            "policy_name": self.policy_name,
+            "policy_slot": 0 if self.policy is not None else None,
+            "policy_action_repeat": (
+                self.policy_action_repeat if self.policy is not None else None
+            ),
+            "policy_action": list(self._current_action),
+        }
 
     def snapshot(self) -> VisualizerSnapshot:
         if self._snapshot is None:

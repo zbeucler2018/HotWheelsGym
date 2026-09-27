@@ -301,7 +301,10 @@ function render(snapshot) {
   ui.frame.src = snapshot.frame_url;
   ui.frameNumber.textContent = `Frame ${snapshot.raw_frame}`;
   ui.progressIndex.textContent = `Reference ${snapshot.geometry.progress_index}`;
-  ui.sessionMeta.textContent = `${snapshot.track} · slot ${snapshot.controlled_slot} · ${snapshot.state_name}`;
+  const policy = snapshot.metadata.policy_enabled
+    ? ` · model driving slot ${snapshot.metadata.policy_slot} · action [${snapshot.metadata.policy_action.join(", ")}]`
+    : " · no-input stepping";
+  ui.sessionMeta.textContent = `${snapshot.track} · viewing slot ${snapshot.controlled_slot}${policy} · ${snapshot.state_name}`;
   renderObservation(snapshot);
   renderGeometry(snapshot);
   renderHistory(snapshot);
