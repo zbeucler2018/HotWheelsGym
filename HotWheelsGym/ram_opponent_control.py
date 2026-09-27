@@ -20,6 +20,7 @@ from .dino_boneyard_track import (
     DINO_TRACK_OBSERVATION_SIZE,
     DINO_TRACK_POINT_COUNT,
     dino_next_power_up_radar,
+    dino_continuous_progress_delta,
     dino_track_pose,
 )
 from .npc_control import (
@@ -40,6 +41,7 @@ DINO_BONEYARD_PROGRESS_COUNT = 342
 DINO_HAIRPIN_START_PROGRESS = 45
 DINO_HAIRPIN_END_PROGRESS = 61
 DINO_RAM_OBSERVATION_VERSION = 7
+DINO_CONTINUOUS_PROGRESS_ABLATION_OBSERVATION_VERSION = 8
 DINO_SECTOR_BOUNDARIES = (0, 32, 45, 61, 92, 124, 156, 188, 220, 252, 284, 316, 342)
 DINO_SECTOR_COUNT = len(DINO_SECTOR_BOUNDARIES) - 1
 DINO_POSITION_CENTER = 1 << 24
@@ -444,6 +446,10 @@ RAM_BASE_OBSERVATION_NAMES = SELF_OBSERVATION_NAMES + tuple(
     for name in OTHER_OBSERVATION_NAMES
 )
 RAM_OBSERVATION_NAMES = RAM_BASE_OBSERVATION_NAMES + DINO_POWER_UP_OBSERVATION_NAMES
+CONTINUOUS_PROGRESS_RATE_OBSERVATION_NAME = "self_continuous_progress_rate"
+RAM_CONTINUOUS_PROGRESS_OBSERVATION_NAMES = (
+    RAM_OBSERVATION_NAMES + (CONTINUOUS_PROGRESS_RATE_OBSERVATION_NAME,)
+)
 
 SELF_OBSERVATION_SIZE = (
     15 + DINO_TRACK_OBSERVATION_SIZE + sum(RAM_ACTION_COMPONENT_SIZES)
@@ -453,9 +459,37 @@ DINO_RAM_BASE_OBSERVATION_SIZE = SELF_OBSERVATION_SIZE + 3 * OTHER_OBSERVATION_S
 DINO_RAM_OBSERVATION_SIZE = (
     DINO_RAM_BASE_OBSERVATION_SIZE + DINO_POWER_UP_OBSERVATION_SIZE
 )
+DINO_CONTINUOUS_PROGRESS_OBSERVATION_SIZE = DINO_RAM_OBSERVATION_SIZE + 1
 
 if len(RAM_OBSERVATION_NAMES) != DINO_RAM_OBSERVATION_SIZE:
     raise RuntimeError("RAM observation name and value counts differ")
+if (
+    len(RAM_CONTINUOUS_PROGRESS_OBSERVATION_NAMES)
+    != DINO_CONTINUOUS_PROGRESS_OBSERVATION_SIZE
+):
+    raise RuntimeError("continuous-progress observation name and value counts differ")
+
+
+def dino_ram_observation_names(
+    *, include_continuous_progress_rate: bool = False
+) -> tuple[str, ...]:
+    """Return the selected stable observation contract for a Dino RAM run."""
+
+    return (
+        RAM_CONTINUOUS_PROGRESS_OBSERVATION_NAMES
+        if include_continuous_progress_rate
+        else RAM_OBSERVATION_NAMES
+    )
+
+
+def dino_ram_observation_size(*, include_continuous_progress_rate: bool = False) -> int:
+    """Return 67 for control or 68 for the continuous-progress ablation."""
+
+    return (
+        DINO_CONTINUOUS_PROGRESS_OBSERVATION_SIZE
+        if include_continuous_progress_rate
+        else DINO_RAM_OBSERVATION_SIZE
+    )
 
 
 def _clip(value: float, low: float = -1.0, high: float = 1.0) -> float:
@@ -694,6 +728,7 @@ def build_dino_ram_observation(
     total_laps: int = 3,
     track_pose: DinoTrackPose | None = None,
     power_ups: tuple[PowerUpState, ...] | None = None,
+    include_continuous_progress_rate: bool = False,
 ) -> tuple[float, ...]:
     """Build the same Dino racer-centric observation for any racer slot."""
 
@@ -774,10 +809,25 @@ def build_dino_ram_observation(
 
     features.extend(dino_next_power_up_radar(track, power_ups).features)
 
-    if len(features) != DINO_RAM_OBSERVATION_SIZE:
+    if include_continuous_progress_rate:
+        previous_track = dino_track_pose(previous)
+        continuous_advance = dino_continuous_progress_delta(
+            previous_track,
+            track,
+            native_advance=advance,
+        )
+        # dino_continuous_progress_delta is deliberately capped to +/-2
+        # projected progress units per emulator frame. Dividing by two maps the
+        # exact reward signal's bounded range directly into [-1, 1].
+        features.append(_clip(continuous_advance / 2.0))
+
+    expected_size = dino_ram_observation_size(
+        include_continuous_progress_rate=include_continuous_progress_rate
+    )
+    if len(features) != expected_size:
         raise RuntimeError(
             f"RAM observation has {len(features)} values, "
-            f"expected {DINO_RAM_OBSERVATION_SIZE}"
+            f"expected {expected_size}"
         )
     return tuple(features)
 

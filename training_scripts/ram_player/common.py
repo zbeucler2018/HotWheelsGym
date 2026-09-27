@@ -25,17 +25,22 @@ from HotWheelsGym.npc_control import button_controlled_vehicle_indices_from_rom
 from HotWheelsGym.ram_opponent_control import (
     DINO_RAM_OBSERVATION_SIZE,
     DINO_RAM_OBSERVATION_VERSION,
+    DINO_CONTINUOUS_PROGRESS_ABLATION_OBSERVATION_VERSION,
     DINO_SECTOR_BOUNDARIES,
     RAM_ACTION_COMPONENTS,
     RAM_ACTION_COMPONENT_SIZES,
     RAM_OBSERVATION_NAMES,
+    RAM_CONTINUOUS_PROGRESS_OBSERVATION_NAMES,
+    dino_ram_observation_size,
 )
 
 from .legacy_policy import (
     LegacyV5PolicyAdapter,
     LegacyV6PolicyAdapter,
+    LegacyV7PolicyAdapter,
     is_legacy_v5_policy,
     is_legacy_v6_policy,
+    is_legacy_v7_policy,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -129,6 +134,15 @@ def load_config(path: Path) -> dict[str, Any]:
         raise ValueError("configure fixed opponents or opponent_league, not both")
     if "reward" in config and not isinstance(config["reward"], dict):
         raise ValueError("reward configuration must be a mapping")
+    if "include_continuous_progress_rate" in config and not isinstance(
+        config["include_continuous_progress_rate"], bool
+    ):
+        raise ValueError("include_continuous_progress_rate must be a boolean")
+    if "evaluation_states" in config and (
+        not isinstance(config["evaluation_states"], list)
+        or not config["evaluation_states"]
+    ):
+        raise ValueError("evaluation_states must be a non-empty list")
     return config
 
 
@@ -192,11 +206,19 @@ def require_all_opponent_slots(opponents: Mapping[int, Any]) -> None:
         )
 
 
-def validate_model_observation_space(model: Any, path: str | Path) -> None:
+def validate_model_observation_space(
+    model: Any,
+    path: str | Path,
+    *,
+    include_continuous_progress_rate: bool = False,
+) -> None:
     """Reject older RAM checkpoints with a useful migration message."""
 
     shape = tuple(getattr(model.observation_space, "shape", ()) or ())
-    expected = (DINO_RAM_OBSERVATION_SIZE,)
+    expected_size = dino_ram_observation_size(
+        include_continuous_progress_rate=include_continuous_progress_rate
+    )
+    expected = (expected_size,)
     if shape != expected:
         legacy_note = ""
         if shape == (43,):
@@ -238,6 +260,12 @@ def validate_model_observation_space(model: Any, path: str | Path) -> None:
                 "pickup-radar values. It can be evaluated through the v6 prefix "
                 "adapter or migrated losslessly for v7 fine-tuning."
             )
+        elif shape == (DINO_RAM_OBSERVATION_SIZE,) and include_continuous_progress_rate:
+            legacy_note = (
+                " This is a 67-input v7 checkpoint. It can be evaluated through "
+                "the v7 prefix adapter or migrated with a zero-initialized "
+                "continuous-progress input column."
+            )
         raise ValueError(
             f"RAM model {path} expects observation shape {shape}, but the active "
             f"contract is {expected}.{legacy_note}"
@@ -262,7 +290,12 @@ def validate_model_action_space(model: Any, path: str | Path) -> None:
         )
 
 
-def load_ram_policy(path: str | Path, *, device: str = "cpu") -> Any:
+def load_ram_policy(
+    path: str | Path,
+    *,
+    device: str = "cpu",
+    include_continuous_progress_rate: bool = False,
+) -> Any:
     """Load any supported RAM checkpoint behind the current shared contract."""
 
     resolved = resolve_repo_path(path).resolve()
@@ -273,7 +306,13 @@ def load_ram_policy(path: str | Path, *, device: str = "cpu") -> Any:
         return LegacyV5PolicyAdapter(model)
     if is_legacy_v6_policy(model):
         return LegacyV6PolicyAdapter(model)
-    validate_model_observation_space(model, resolved)
+    if include_continuous_progress_rate and is_legacy_v7_policy(model):
+        return LegacyV7PolicyAdapter(model)
+    validate_model_observation_space(
+        model,
+        resolved,
+        include_continuous_progress_rate=include_continuous_progress_rate,
+    )
     validate_model_action_space(model, resolved)
     return model
 
@@ -334,6 +373,26 @@ def training_state_paths(config: dict[str, Any]) -> list[Path | None]:
         if not state.is_file():
             raise FileNotFoundError(state)
         states.append(state)
+    return states
+
+
+def evaluation_state_paths(config: Mapping[str, Any]) -> list[Path]:
+    """Resolve an optional deterministic stock-traffic evaluation state suite."""
+
+    raw_states = config.get("evaluation_states")
+    if raw_states is None:
+        raw_states = [
+            config.get(
+                "stock_evaluation_state",
+                "training_scripts/data/states/dino_boneyard_multi.state",
+            )
+        ]
+    if not isinstance(raw_states, list) or not raw_states:
+        raise ValueError("evaluation_states must be a non-empty list of state paths")
+    states = [resolve_repo_path(str(value)).resolve() for value in raw_states]
+    for state in states:
+        if not state.is_file():
+            raise FileNotFoundError(state)
     return states
 
 
@@ -414,6 +473,7 @@ def make_ram_env(
     state_pool_selection: str = "random",
     monitor_path: str | None = None,
     reward_config: Mapping[str, object] | None = None,
+    include_continuous_progress_rate: bool = False,
 ) -> gym.Env:
     base = HotWheelsGym.make(ENV_ID, render_mode="rgb_array")
     if opponent_paths and opponent_league:
@@ -440,17 +500,28 @@ def make_ram_env(
         league_models: dict[str, Any] = {}
 
         for slot, path in (opponent_paths or {}).items():
-            models[int(slot)] = load_ram_policy(path)
+            models[int(slot)] = load_ram_policy(
+                path,
+                include_continuous_progress_rate=include_continuous_progress_rate,
+            )
         for label, path in (opponent_league or {}).items():
-            league_models[str(label)] = load_ram_policy(path)
+            league_models[str(label)] = load_ram_policy(
+                path,
+                include_continuous_progress_rate=include_continuous_progress_rate,
+            )
         env = DinoRAMModelOpponentEnv(
             env,
             models,
             opponent_league=league_models,
             seed=seed,
             action_repeat=frame_skip,
+            include_continuous_progress_rate=include_continuous_progress_rate,
         )
-    env = DinoRAMPlayerEnv(env, reward_config=reward_config)
+    env = DinoRAMPlayerEnv(
+        env,
+        reward_config=reward_config,
+        include_continuous_progress_rate=include_continuous_progress_rate,
+    )
     env = RAMActionRepeat(env, repeat=frame_skip)
     env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_steps)
     if monitor_path:
@@ -485,6 +556,9 @@ def write_run_metadata(
     resume_model = (
         resolve_repo_path(str(raw_resume_model)).resolve() if raw_resume_model else None
     )
+    include_continuous_progress_rate = bool(
+        config.get("include_continuous_progress_rate", False)
+    )
     metadata = {
         "environment": ENV_ID,
         "config_path": str(config_path.resolve()),
@@ -499,8 +573,16 @@ def write_run_metadata(
             if resume_model is not None
             else None
         ),
-        "observation_version": DINO_RAM_OBSERVATION_VERSION,
-        "observation_names": RAM_OBSERVATION_NAMES,
+        "observation_version": (
+            DINO_CONTINUOUS_PROGRESS_ABLATION_OBSERVATION_VERSION
+            if include_continuous_progress_rate
+            else DINO_RAM_OBSERVATION_VERSION
+        ),
+        "observation_names": (
+            RAM_CONTINUOUS_PROGRESS_OBSERVATION_NAMES
+            if include_continuous_progress_rate
+            else RAM_OBSERVATION_NAMES
+        ),
         "sector_progress_boundaries": DINO_SECTOR_BOUNDARIES,
         "power_up_placements": [
             {

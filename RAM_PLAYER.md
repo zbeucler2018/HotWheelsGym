@@ -281,6 +281,28 @@ then reads object state, type, and X/Y/Z. State `0` is available, state `2` is
 collected/inactive, and state `3` is the respawn transition. Availability is a
 shared track fact, so Player 1 and every model NPC see the same value.
 
+### Continuous-progress observation ablation
+
+`dino_boneyard_continuous_progress_control.yml` retains the 67-value v7
+contract. Its matched experiment config opts into one appended 68th value,
+`self_continuous_progress_rate`. It is the same projected sub-checkpoint delta
+used by the time-trial reward, including the native checkpoint wrap-direction
+guard. The projection helper caps movement to `[-2, 2]` course-progress units
+per emulator frame; the observation is therefore exactly `delta / 2`, bounded
+to `[-1, 1]`. Positive means forward progress, zero means no projected motion,
+and negative means reverse motion.
+
+The experiment migrates a 67-input PPO checkpoint by appending one all-zero
+column to the first policy and value-network layers. Thus the new input is
+initially ignored and deterministic actions match the source checkpoint until
+learning changes those weights. A frozen 67-input checkpoint can also race in
+the 68-D environment through a prefix adapter. Run the paired configurations
+from the same v7 checkpoint and compare their best checkpoints with
+`continuous_progress_ablation_eval.py`; the fixed suite covers the checked-in
+start, early, mid, and late Dino states plus a three-race frozen-league test.
+There is no committed recovery savestate, so the suite does not pretend to test
+one.
+
 The validated Dino Boneyard layout is:
 
 | Progress | Type | X | Y | Z | Lateral |

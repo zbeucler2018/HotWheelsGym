@@ -14,7 +14,10 @@ from HotWheelsGym.RAMOpponent import (
     _is_white_respawn_frame,
     _newly_finished_slots,
 )
-from HotWheelsGym.ram_opponent_control import DINO_RAM_OBSERVATION_SIZE
+from HotWheelsGym.ram_opponent_control import (
+    DINO_CONTINUOUS_PROGRESS_OBSERVATION_SIZE,
+    DINO_RAM_OBSERVATION_SIZE,
+)
 from training_scripts.ram_player.callbacks import (
     evaluate_ram_policy,
     evaluation_metric_names,
@@ -33,12 +36,17 @@ from training_scripts.ram_player.legacy_policy import (
     V6_ACTION_HISTORY_START,
     LegacyV5PolicyAdapter,
     LegacyV6PolicyAdapter,
+    LegacyV7PolicyAdapter,
 )
 from training_scripts.ram_player.phase0_league_eval import _rotations
+from training_scripts.ram_player.continuous_progress_ablation_eval import (
+    _matched_configs,
+)
 from training_scripts.ram_player.sweep import checkpoint_sort_key
 from training_scripts.ram_player.train import (
     V6_INPUT_LAYER_KEYS,
     _migrate_v6_policy_state,
+    _migrate_observation_policy_state,
     _verify_resume_ppo_configuration,
 )
 
@@ -125,6 +133,33 @@ class RAMEvaluationToolTests(unittest.TestCase):
             model.observation, observation[:LEGACY_V6_OBSERVATION_SIZE]
         )
 
+    def test_legacy_v7_policy_adapter_ignores_continuous_progress_suffix(self):
+        class FakeV7Model:
+            observation_space = gym.spaces.Box(
+                -1.0, 1.0, (DINO_RAM_OBSERVATION_SIZE,), np.float32
+            )
+            action_space = gym.spaces.MultiDiscrete((4, 3, 2))
+
+            def __init__(self):
+                self.observation = None
+
+            def predict(self, observation, *, deterministic=True):
+                self.observation = np.array(observation, copy=True)
+                return np.asarray((1, 2, 1)), None
+
+        model = FakeV7Model()
+        policy = LegacyV7PolicyAdapter(model)
+        observation = np.linspace(
+            -1.0, 1.0, DINO_CONTINUOUS_PROGRESS_OBSERVATION_SIZE, dtype=np.float32
+        )
+        action, _ = policy.predict(observation)
+
+        self.assertEqual(action.tolist(), [1, 2, 1])
+        self.assertEqual(model.observation.shape, (DINO_RAM_OBSERVATION_SIZE,))
+        np.testing.assert_array_equal(
+            model.observation, observation[:DINO_RAM_OBSERVATION_SIZE]
+        )
+
     def test_v6_policy_state_migration_preserves_old_inputs_and_zeros_new_ones(self):
         old_width = LEGACY_V6_OBSERVATION_SIZE
         new_width = DINO_RAM_OBSERVATION_SIZE
@@ -154,6 +189,35 @@ class RAMEvaluationToolTests(unittest.TestCase):
         torch.testing.assert_close(
             migrated["action_net.bias"], source["action_net.bias"]
         )
+
+    def test_v7_policy_state_migration_zeros_only_continuous_progress_input(self):
+        source = {
+            V6_INPUT_LAYER_KEYS[0]: torch.arange(
+                2 * DINO_RAM_OBSERVATION_SIZE, dtype=torch.float32
+            ).reshape(2, DINO_RAM_OBSERVATION_SIZE),
+            V6_INPUT_LAYER_KEYS[1]: torch.arange(
+                3 * DINO_RAM_OBSERVATION_SIZE, dtype=torch.float32
+            ).reshape(3, DINO_RAM_OBSERVATION_SIZE),
+        }
+        target = {
+            V6_INPUT_LAYER_KEYS[0]: torch.empty(
+                (2, DINO_CONTINUOUS_PROGRESS_OBSERVATION_SIZE)
+            ),
+            V6_INPUT_LAYER_KEYS[1]: torch.empty(
+                (3, DINO_CONTINUOUS_PROGRESS_OBSERVATION_SIZE)
+            ),
+        }
+
+        migrated = _migrate_observation_policy_state(source, target)
+
+        for name in V6_INPUT_LAYER_KEYS:
+            torch.testing.assert_close(
+                migrated[name][:, :DINO_RAM_OBSERVATION_SIZE], source[name]
+            )
+            torch.testing.assert_close(
+                migrated[name][:, DINO_RAM_OBSERVATION_SIZE],
+                torch.zeros_like(migrated[name][:, DINO_RAM_OBSERVATION_SIZE]),
+            )
 
     def test_phase0_rotations_put_each_model_in_each_slot(self):
         models = [("v5", Path("five")), ("v6", Path("six")), ("v8", Path("eight"))]
@@ -256,6 +320,21 @@ class RAMEvaluationToolTests(unittest.TestCase):
         self.assertEqual(config["reward"]["power_up_approach_scale"], 2.0)
         self.assertFalse(config["opponents"])
         self.assertFalse(config["opponent_league"])
+
+    def test_continuous_progress_ablation_configs_are_matched(self):
+        root = Path(__file__).resolve().parents[1] / "training_scripts" / "ram_player"
+        control = load_config(
+            root / "dino_boneyard_continuous_progress_control.yml"
+        )
+        experiment = load_config(
+            root / "dino_boneyard_continuous_progress_experiment.yml"
+        )
+
+        _matched_configs(control, experiment)
+        self.assertEqual(control["total_timesteps"], 300_000)
+        self.assertFalse(control["include_continuous_progress_rate"])
+        self.assertTrue(experiment["include_continuous_progress_rate"])
+        self.assertEqual(len(control["evaluation_states"]), 5)
 
     def test_evaluation_aggregates_track_quality_metrics(self):
         class OneStepEnv(gym.Env):

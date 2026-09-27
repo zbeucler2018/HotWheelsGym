@@ -9,6 +9,7 @@ import numpy as np
 from HotWheelsGym.dino_boneyard_track import DINO_TRACK_OBSERVATION_SIZE
 from HotWheelsGym.ram_opponent_control import (
     DINO_RAM_BASE_OBSERVATION_SIZE,
+    DINO_CONTINUOUS_PROGRESS_OBSERVATION_SIZE,
     DINO_RAM_OBSERVATION_SIZE,
     RAM_ACTION_COMPONENT_SIZES,
 )
@@ -16,6 +17,7 @@ from HotWheelsGym.ram_opponent_control import (
 LEGACY_V5_OBSERVATION_SIZE = 60
 LEGACY_V5_ACTION_SIZE = 7
 LEGACY_V6_OBSERVATION_SIZE = DINO_RAM_BASE_OBSERVATION_SIZE
+LEGACY_V7_OBSERVATION_SIZE = DINO_RAM_OBSERVATION_SIZE
 LEGACY_V5_ACTIONS = (
     (0, 0, 0),  # coast
     (1, 0, 0),  # accelerate
@@ -46,15 +48,29 @@ def is_legacy_v6_policy(model: Any) -> bool:
     )
 
 
+def is_legacy_v7_policy(model: Any) -> bool:
+    """Return whether a factorized policy predates the 68-D ablation input."""
+
+    shape = tuple(getattr(model.observation_space, "shape", ()) or ())
+    nvec = tuple(int(value) for value in getattr(model.action_space, "nvec", ()))
+    return shape == (LEGACY_V7_OBSERVATION_SIZE,) and nvec == tuple(
+        RAM_ACTION_COMPONENT_SIZES
+    )
+
+
 def legacy_v5_observation(observation: np.ndarray, previous_action: int) -> np.ndarray:
     """Translate the shared v6 observation into v5's seven-action history."""
 
     current = np.asarray(observation, dtype=np.float32).reshape(-1)
-    if current.shape != (DINO_RAM_OBSERVATION_SIZE,):
+    if current.shape not in {
+        (DINO_RAM_OBSERVATION_SIZE,),
+        (DINO_CONTINUOUS_PROGRESS_OBSERVATION_SIZE,),
+    }:
         raise ValueError(
             f"active RAM observation expected {DINO_RAM_OBSERVATION_SIZE} values, "
             f"got {current.shape}"
         )
+    current = current[:DINO_RAM_OBSERVATION_SIZE]
     action_history = np.zeros(LEGACY_V5_ACTION_SIZE, dtype=np.float32)
     action_history[previous_action] = 1.0
     legacy = np.concatenate(
@@ -115,7 +131,10 @@ class LegacyV6PolicyAdapter:
         self, observation: np.ndarray, *, deterministic: bool = True
     ) -> tuple[np.ndarray, Any]:
         current = np.asarray(observation, dtype=np.float32).reshape(-1)
-        if current.shape != (DINO_RAM_OBSERVATION_SIZE,):
+        if current.shape not in {
+            (DINO_RAM_OBSERVATION_SIZE,),
+            (DINO_CONTINUOUS_PROGRESS_OBSERVATION_SIZE,),
+        }:
             raise ValueError(
                 f"active RAM observation expected {DINO_RAM_OBSERVATION_SIZE} "
                 f"values, got {current.shape}"
@@ -125,11 +144,41 @@ class LegacyV6PolicyAdapter:
         )
 
 
-def adapt_legacy_policy(model: Any) -> Any:
+class LegacyV7PolicyAdapter:
+    """Let a 67-input factorized policy ignore the appended ablation feature."""
+
+    def __init__(self, model: Any) -> None:
+        if not is_legacy_v7_policy(model):
+            raise ValueError("model does not use the pre-ablation v7 RAM contract")
+        self.model = model
+
+    def reset(self) -> None:
+        return None
+
+    def predict(
+        self, observation: np.ndarray, *, deterministic: bool = True
+    ) -> tuple[np.ndarray, Any]:
+        current = np.asarray(observation, dtype=np.float32).reshape(-1)
+        if current.shape != (DINO_CONTINUOUS_PROGRESS_OBSERVATION_SIZE,):
+            raise ValueError(
+                "continuous-progress adapter expected "
+                f"{DINO_CONTINUOUS_PROGRESS_OBSERVATION_SIZE} values, "
+                f"got {current.shape}"
+            )
+        return self.model.predict(
+            current[:LEGACY_V7_OBSERVATION_SIZE], deterministic=deterministic
+        )
+
+
+def adapt_legacy_policy(
+    model: Any, *, include_continuous_progress_rate: bool = False
+) -> Any:
     """Adapt known pre-radar policies; return current/unknown models unchanged."""
 
     if is_legacy_v5_policy(model):
         return LegacyV5PolicyAdapter(model)
     if is_legacy_v6_policy(model):
         return LegacyV6PolicyAdapter(model)
+    if include_continuous_progress_rate and is_legacy_v7_policy(model):
+        return LegacyV7PolicyAdapter(model)
     return model

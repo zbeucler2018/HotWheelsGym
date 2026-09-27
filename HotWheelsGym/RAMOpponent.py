@@ -34,7 +34,6 @@ from .npc_control import (
 )
 from .ram_opponent_control import (
     DINO_BONEYARD_PROGRESS_COUNT,
-    DINO_RAM_OBSERVATION_SIZE,
     DinoHairpinTelemetry,
     DinoSectorTelemetry,
     LapSplitTracker,
@@ -46,6 +45,7 @@ from .ram_opponent_control import (
     RacerButtonState,
     build_dino_ram_observation,
     boost_telemetry,
+    dino_ram_observation_size,
     normalize_racer_action,
     player_buttons_from_action,
     race_reward,
@@ -285,6 +285,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         env: gym.Env,
         *,
         reward_config: Mapping[str, object] | None = None,
+        include_continuous_progress_rate: bool = False,
     ) -> None:
         _validate_dino_multi(env)
         super().__init__(env)
@@ -312,13 +313,18 @@ class DinoRAMPlayerEnv(gym.Wrapper):
         self._jet_boost_approach_abs_lateral_error_total = 0.0
         self._power_up_approach_reward_total = 0.0
         self._reward_config = RaceRewardConfig.from_mapping(reward_config)
+        self.include_continuous_progress_rate = include_continuous_progress_rate
         self.action_space = gym.spaces.MultiDiscrete(
             np.asarray(RAM_ACTION_COMPONENT_SIZES, dtype=np.int64)
         )
         self.observation_space = gym.spaces.Box(
             low=-1.0,
             high=1.0,
-            shape=(DINO_RAM_OBSERVATION_SIZE,),
+            shape=(
+                dino_ram_observation_size(
+                    include_continuous_progress_rate=include_continuous_progress_rate
+                ),
+            ),
             dtype=np.float32,
         )
 
@@ -341,6 +347,7 @@ class DinoRAMPlayerEnv(gym.Wrapper):
                 total_laps=int(_bare_env(self.env).total_laps),
                 track_pose=self._track_pose,
                 power_ups=self._power_ups,
+                include_continuous_progress_rate=self.include_continuous_progress_rate,
             ),
             dtype=np.float32,
         )
@@ -726,6 +733,7 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         deterministic: bool = True,
         action_repeat: int = 4,
         mask_opponent_respawn_flashes: bool = True,
+        include_continuous_progress_rate: bool = False,
     ) -> None:
         _validate_dino_multi(env)
         if opponents and opponent_league:
@@ -754,6 +762,7 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
         self.deterministic = deterministic
         self.action_repeat = action_repeat
         self.mask_opponent_respawn_flashes = mask_opponent_respawn_flashes
+        self.include_continuous_progress_rate = include_continuous_progress_rate
         self._race: RaceMemory | None = None
         self._progress: RaceProgressTracker | None = None
         self._states: dict[int, RacerState] | None = None
@@ -809,6 +818,7 @@ class DinoRAMModelOpponentEnv(gym.Wrapper):
                 self._actions[slot],
                 total_laps=int(_bare_env(self.env).total_laps),
                 power_ups=self._power_ups,
+                include_continuous_progress_rate=self.include_continuous_progress_rate,
             ),
             dtype=np.float32,
         )

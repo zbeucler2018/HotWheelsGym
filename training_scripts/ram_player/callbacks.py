@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
-from statistics import fmean
+from statistics import fmean, median
 from typing import Any, Callable
 
 import gymnasium as gym
@@ -63,6 +63,8 @@ class RAMEvaluation:
     finish_rate: float
     win_rate: float
     mean_finish_frames: float
+    median_finish_frames: float
+    mean_continuous_progress_per_frame: float
     mean_speed: float
     mean_rank: float
     mean_abs_lateral_offset: float
@@ -247,6 +249,7 @@ def evaluate_ram_policy(
     finishes: list[float] = []
     wins: list[float] = []
     finish_frames: list[float] = []
+    continuous_progress_rates: list[float] = []
     mean_speeds: list[float] = []
     ranks: list[float] = []
     lateral_offsets: list[float] = []
@@ -309,6 +312,7 @@ def evaluate_ram_policy(
         jet_boost_frames = 0
         jet_boost_pickups = 0
         skid_frames = 0
+        continuous_progress = 0.0
         info: dict[str, Any] = {}
         while not (terminated or truncated):
             action, _ = model.predict(observation, deterministic=True)
@@ -336,6 +340,9 @@ def evaluate_ram_policy(
             jet_boost_frames += int(info.get("ram_decision_jet_boost_frames", 0))
             jet_boost_pickups += int(info.get("ram_decision_jet_boost_pickups", 0))
             skid_frames += int(info.get("ram_decision_skid_frames", 0))
+            continuous_progress += float(
+                info.get("ram_decision_continuous_progress_delta", 0.0)
+            )
 
         finished = bool(info.get("ram_player_finished", False))
         rank = int(info.get("ram_player_rank", 4))
@@ -362,6 +369,9 @@ def evaluate_ram_policy(
         wins.append(float(won))
         if finished and finish_frame is not None:
             finish_frames.append(float(finish_frame))
+        continuous_progress_rates.append(
+            continuous_progress / max(1, observed_frames)
+        )
         mean_speeds.append(fmean(speeds) if speeds else 0.0)
         ranks.append(float(rank))
         lateral_offsets.append(lateral_total / max(1, observed_frames))
@@ -448,6 +458,8 @@ def evaluate_ram_policy(
         finish_rate=fmean(finishes),
         win_rate=fmean(wins),
         mean_finish_frames=fmean(finish_frames) if finish_frames else 0.0,
+        median_finish_frames=median(finish_frames) if finish_frames else 0.0,
+        mean_continuous_progress_per_frame=fmean(continuous_progress_rates),
         mean_speed=fmean(mean_speeds),
         mean_rank=fmean(ranks),
         mean_abs_lateral_offset=fmean(lateral_offsets),

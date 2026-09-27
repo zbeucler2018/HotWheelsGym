@@ -113,6 +113,53 @@ class RAMPlayerControlTests(unittest.TestCase):
         )
         self.assertAlmostEqual(delta, 0.5, places=4)
 
+    def test_continuous_progress_feature_is_appended_and_bounded(self):
+        race = npc.RaceMemory(state_memory(self.state_path))
+        baseline = ram.read_racer_states(race)
+        base_state = baseline[0]
+        start = track.DINO_BONEYARD_CENTERLINE[100]
+        end = track.DINO_BONEYARD_CENTERLINE[101]
+
+        def point(fraction):
+            return replace(
+                base_state,
+                progress=100,
+                x=round(start[0] + fraction * (end[0] - start[0])),
+                z=round(start[1] + fraction * (end[1] - start[1])),
+            )
+
+        previous = dict(baseline)
+        previous[0] = point(0.25)
+        current = dict(baseline)
+        current[0] = point(0.75)
+        tracker = ram.RaceProgressTracker.from_states(
+            previous, ram.DINO_BONEYARD_PROGRESS_COUNT
+        )
+        control = ram.build_dino_ram_observation(
+            current, previous, tracker, 0, ram.RAM_DEFAULT_ACTION
+        )
+        experiment = ram.build_dino_ram_observation(
+            current,
+            previous,
+            tracker,
+            0,
+            ram.RAM_DEFAULT_ACTION,
+            include_continuous_progress_rate=True,
+        )
+
+        self.assertEqual(len(control), ram.DINO_RAM_OBSERVATION_SIZE)
+        self.assertEqual(
+            len(experiment), ram.DINO_CONTINUOUS_PROGRESS_OBSERVATION_SIZE
+        )
+        self.assertEqual(experiment[:-1], control)
+        self.assertEqual(
+            ram.RAM_CONTINUOUS_PROGRESS_OBSERVATION_NAMES[-1],
+            "self_continuous_progress_rate",
+        )
+        # A 0.5 projected-unit move divided by the documented +/-2 cap is 0.25.
+        self.assertAlmostEqual(experiment[-1], 0.25, places=4)
+        self.assertTrue(all(-1.0 <= value <= 1.0 for value in experiment))
+
     def test_track_observation_names_are_part_of_shared_contract(self):
         expected = {
             "track_lateral_offset",

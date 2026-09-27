@@ -1,0 +1,65 @@
+run_name: dino_ram_continuous_progress_experiment
+
+# Matched, short continuation experiment. Keep this file identical to the
+# control config except for the observation switch and run name.
+resume_model: training_scripts/ram_runs/dino_ram_player_power_up_radar_v10_20260915T132334Z/evaluation/best_model.zip
+include_continuous_progress_rate: true
+total_timesteps: 300000
+num_envs: 3
+seed: 2032
+
+environment: HWSTC-dino_boneyard-multi-3
+frame_skip: 4
+max_episode_steps: 6000
+evaluation_max_episode_steps: 6000
+
+opponents: {}
+opponent_league:
+  v5: training_scripts/ram_runs/dino_ram_player_jet_boost_skid_v5_20260911T025018Z/evaluation_sweep_20260913T025433Z/fastest_model.zip
+  v6: training_scripts/ram_runs/dino_ram_player_factorized_v6_20260913T204756Z/evaluation/best_model.zip
+  v8: training_scripts/ram_runs/dino_ram_player_pickup_v8_corrected_20260914T203738Z/evaluation/best_model.zip
+opponent_state: training_scripts/ram_runs/private/dino_four_players.state
+training_states: []
+sample_training_states: false
+
+evaluation_states:
+  - training_scripts/data/states/dino_boneyard_multi.state
+  - training_scripts/data/states/dino_boneyard_multi_71.state
+  - training_scripts/data/states/dino_boneyard_multi_156.state
+  - training_scripts/data/states/dino_boneyard_multi_180.state
+  - training_scripts/data/states/dino_boneyard_multi_290.state
+
+reward:
+  mode: time_trial
+  progress_scale: 1.0
+  frame_cost: 0.02
+  wall_penalty: 0.1
+  wrong_way_penalty: 0.02
+  respawn_penalty: 10.0
+  rank_gain: 0.5
+  lap_bonus: 5.0
+  finish_bonus: 50.0
+  jet_boost_pickup_bonus: 8.0
+  relative_progress_scale: 0.1
+  win_bonus: 25.0
+  opponent_finish_penalty: 10.0
+
+eval_every_timesteps: 50000
+eval_episodes: 5
+league_eval_episodes: 3
+checkpoint_every_timesteps: 50000
+record_video: false
+
+ppo:
+  learning_rate: 0.000025
+  n_steps: 1024
+  batch_size: 256
+  n_epochs: 5
+  gamma: 0.995
+  gae_lambda: 0.95
+  clip_range: 0.1
+  ent_coef: 0.003
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  policy_layers: [128, 128]
+  value_layers: [128, 128]

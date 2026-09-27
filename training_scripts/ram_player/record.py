@@ -50,6 +50,9 @@ def record_model(
     require_all_opponent_slots(opponent_paths or {})
     video_path.parent.mkdir(parents=True, exist_ok=True)
     frame_skip = int(config["frame_skip"])
+    include_continuous_progress_rate = bool(
+        config.get("include_continuous_progress_rate", False)
+    )
     env = make_ram_env(
         frame_skip=frame_skip,
         max_episode_steps=evaluation_episode_steps(config),
@@ -57,11 +60,19 @@ def record_model(
         opponent_paths=opponent_paths,
         state_path=(str(opponent_state_path(config)) if opponent_paths else None),
         reward_config=config.get("reward"),
+        include_continuous_progress_rate=include_continuous_progress_rate,
     )
     loaded_model = PPO.load(model_path, device=device)
-    model = adapt_legacy_policy(loaded_model)
+    model = adapt_legacy_policy(
+        loaded_model,
+        include_continuous_progress_rate=include_continuous_progress_rate,
+    )
     if model is loaded_model:
-        validate_model_observation_space(model, model_path)
+        validate_model_observation_space(
+            model,
+            model_path,
+            include_continuous_progress_rate=include_continuous_progress_rate,
+        )
         validate_model_action_space(model, model_path)
     reset_policy = getattr(model, "reset", None)
     if callable(reset_policy):

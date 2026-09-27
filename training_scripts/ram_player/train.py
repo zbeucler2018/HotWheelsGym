@@ -19,6 +19,7 @@ from .callbacks import RAMEvalCallback
 from .common import (
     DEFAULT_CONFIG,
     DEFAULT_RUN_ROOT,
+    evaluation_state_paths,
     evaluation_episode_steps,
     load_config,
     make_ram_env,
@@ -33,7 +34,7 @@ from .common import (
     validate_model_observation_space,
     write_run_metadata,
 )
-from .legacy_policy import is_legacy_v6_policy
+from .legacy_policy import is_legacy_v6_policy, is_legacy_v7_policy
 
 V6_INPUT_LAYER_KEYS = (
     "mlp_extractor.policy_net.0.weight",
@@ -154,17 +155,17 @@ def _resume_summary(model: PPO) -> str:
     )
 
 
-def _migrate_v6_policy_state(
+def _migrate_observation_policy_state(
     source_state: dict[str, torch.Tensor],
     target_state: dict[str, torch.Tensor],
 ) -> dict[str, torch.Tensor]:
-    """Append zero-weight pickup inputs while preserving all v6 behavior."""
+    """Append zero-weight observation inputs while preserving source behavior."""
 
     migrated: dict[str, torch.Tensor] = {}
     expanded: set[str] = set()
     for name, target in target_state.items():
         if name not in source_state:
-            raise RuntimeError(f"v6 policy migration is missing tensor {name}")
+            raise RuntimeError(f"policy migration is missing tensor {name}")
         source = source_state[name]
         if source.shape == target.shape:
             migrated[name] = source.detach().clone()
@@ -187,9 +188,49 @@ def _migrate_v6_policy_state(
         )
     if expanded != set(V6_INPUT_LAYER_KEYS):
         raise RuntimeError(
-            "v6 policy migration did not expand both policy and value input layers"
+            "policy migration did not expand both policy and value input layers"
         )
     return migrated
+
+
+def _migrate_v6_policy_state(
+    source_state: dict[str, torch.Tensor],
+    target_state: dict[str, torch.Tensor],
+) -> dict[str, torch.Tensor]:
+    """Backward-compatible name for the v6-to-newer zero-column migration."""
+
+    return _migrate_observation_policy_state(source_state, target_state)
+
+
+def _migrate_observation_model(
+    source: PPO,
+    training_env: SubprocVecEnv,
+    *,
+    ppo: dict[str, Any],
+    policy_kwargs: dict[str, Any],
+    tensorboard_log: Path,
+    seed: int,
+    device: str,
+) -> PPO:
+    """Create an expanded-input PPO model with zero-weight appended inputs."""
+
+    model = PPO(
+        "MlpPolicy",
+        training_env,
+        policy_kwargs=policy_kwargs,
+        tensorboard_log=str(tensorboard_log),
+        verbose=1,
+        seed=seed,
+        device=device,
+        **ppo,
+    )
+    migrated = _migrate_observation_policy_state(
+        source.policy.state_dict(), model.policy.state_dict()
+    )
+    model.policy.load_state_dict(migrated, strict=True)
+    model.num_timesteps = source.num_timesteps
+    model._n_updates = source._n_updates
+    return model
 
 
 def _migrate_v6_model(
@@ -202,25 +243,17 @@ def _migrate_v6_model(
     seed: int,
     device: str,
 ) -> PPO:
-    """Create a v7 PPO model whose initial policy is exactly the v6 source."""
+    """Backward-compatible v6 migration entry point used by existing tests."""
 
-    model = PPO(
-        "MlpPolicy",
+    return _migrate_observation_model(
+        source,
         training_env,
+        ppo=ppo,
         policy_kwargs=policy_kwargs,
-        tensorboard_log=str(tensorboard_log),
-        verbose=1,
+        tensorboard_log=tensorboard_log,
         seed=seed,
         device=device,
-        **ppo,
     )
-    migrated = _migrate_v6_policy_state(
-        source.policy.state_dict(), model.policy.state_dict()
-    )
-    model.policy.load_state_dict(migrated, strict=True)
-    model.num_timesteps = source.num_timesteps
-    model._n_updates = source._n_updates
-    return model
 
 
 def main() -> None:
@@ -286,6 +319,9 @@ def main() -> None:
     league_paths = {label: str(path) for label, path in opponent_league.items()}
     training_state_values = [str(state) if state else None for state in states]
     sample_training_states = bool(config.get("sample_training_states", False))
+    include_continuous_progress_rate = bool(
+        config.get("include_continuous_progress_rate", False)
+    )
 
     env_functions = []
     for index in range(int(config["num_envs"])):
@@ -312,6 +348,7 @@ def main() -> None:
                 ),
                 monitor_path=str(run_dir / "monitor" / f"worker_{index}"),
                 reward_config=config.get("reward"),
+                include_continuous_progress_rate=include_continuous_progress_rate,
             )
         )
 
@@ -330,29 +367,16 @@ def main() -> None:
     completed = False
     training_env = SubprocVecEnv(env_functions)
     try:
-        stock_evaluation_state = (
-            resolve_repo_path(
-                config.get(
-                    "stock_evaluation_state",
-                    "training_scripts/data/states/dino_boneyard_multi.state",
-                )
-            ).resolve()
-            if has_model_opponents
-            else None
-        )
-        if stock_evaluation_state is not None and not stock_evaluation_state.is_file():
-            raise FileNotFoundError(stock_evaluation_state)
+        stock_evaluation_states = evaluation_state_paths(config)
         stock_eval_env_factory = partial(
             make_ram_env,
             frame_skip=int(config["frame_skip"]),
             max_episode_steps=evaluation_episode_steps(config),
             seed=int(config["seed"]) + 10_000,
-            state_path=(
-                str(stock_evaluation_state)
-                if stock_evaluation_state is not None
-                else None
-            ),
+            state_paths=[str(state) for state in stock_evaluation_states],
+            state_pool_selection="cycle",
             reward_config=config.get("reward"),
+            include_continuous_progress_rate=include_continuous_progress_rate,
         )
         league_eval_env_factory = (
             partial(
@@ -364,6 +388,7 @@ def main() -> None:
                 opponent_league=league_paths,
                 state_path=str(states[0]),
                 reward_config=config.get("reward"),
+                include_continuous_progress_rate=include_continuous_progress_rate,
             )
             if has_model_opponents
             else None
@@ -371,8 +396,15 @@ def main() -> None:
         if resume_path is not None:
             source_model = PPO.load(resume_path, device=args.device)
             validate_model_action_space(source_model, resume_path)
-            if is_legacy_v6_policy(source_model):
-                model = _migrate_v6_model(
+            source_shape = tuple(source_model.observation_space.shape or ())
+            target_shape = tuple(training_env.observation_space.shape or ())
+            if (
+                len(source_shape) == 1
+                and len(target_shape) == 1
+                and source_shape[0] < target_shape[0]
+                and (is_legacy_v6_policy(source_model) or is_legacy_v7_policy(source_model))
+            ):
+                model = _migrate_observation_model(
                     source_model,
                     training_env,
                     ppo=ppo,
@@ -382,8 +414,9 @@ def main() -> None:
                     device=args.device,
                 )
                 print(
-                    "Migrated observation v6 -> v7 with zero-initialized pickup "
-                    "inputs; the starting policy is behavior-identical."
+                    f"Migrated observation {source_shape[0]} -> {target_shape[0]} "
+                    "with zero-initialized appended input columns; the starting "
+                    "policy is behavior-identical."
                 )
             else:
                 model = PPO.load(
@@ -395,7 +428,11 @@ def main() -> None:
                     # from the checkpoint and silently ignores this run's YAML.
                     custom_objects=dict(ppo),
                 )
-                validate_model_observation_space(model, resume_path)
+                validate_model_observation_space(
+                    model,
+                    resume_path,
+                    include_continuous_progress_rate=include_continuous_progress_rate,
+                )
             _verify_resume_ppo_configuration(model, ppo)
             print(f"Applied resume PPO configuration: {_resume_summary(model)}")
         else:

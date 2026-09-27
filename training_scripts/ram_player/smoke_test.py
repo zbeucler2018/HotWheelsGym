@@ -80,6 +80,9 @@ def main() -> None:
         opponent_league={label: str(path) for label, path in opponent_league.items()},
         state_path=str(states[0]) if states[0] else None,
         reward_config=config.get("reward"),
+        include_continuous_progress_rate=bool(
+            config.get("include_continuous_progress_rate", False)
+        ),
     )
     try:
         observation, info = env.reset(seed=int(config["seed"]))
