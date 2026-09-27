@@ -366,8 +366,11 @@ function render(snapshot, updateFrame = !streamConnected) {
   if (updateFrame) ui.frame.src = snapshot.frame_url;
   ui.frameNumber.textContent = `Frame ${snapshot.raw_frame}`;
   ui.progressIndex.textContent = `Reference ${snapshot.geometry.progress_index}`;
+  const actionButtons = snapshot.metadata.policy_action_buttons?.length
+    ? snapshot.metadata.policy_action_buttons.join(" + ")
+    : "none";
   const policy = snapshot.metadata.policy_enabled
-    ? ` · model driving slot ${snapshot.metadata.policy_slot} · action [${snapshot.metadata.policy_action.join(", ")}]`
+    ? ` · model driving slot ${snapshot.metadata.policy_slot} · raw action [${snapshot.metadata.policy_action.join(", ")}] → buttons ${actionButtons}`
     : " · no-input stepping";
   ui.sessionMeta.textContent = `${snapshot.track} · viewing slot ${snapshot.controlled_slot}${policy} · ${snapshot.state_name}`;
   renderObservation(snapshot);

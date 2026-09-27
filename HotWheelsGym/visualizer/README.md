@@ -36,7 +36,8 @@ python -m HotWheelsGym.visualizer \
 The model always drives native racer slot 0. The controlled-slot selector only
 changes which racer's semantically equivalent observation and geometry are
 displayed. Model loading remains optional and Stable-Baselines3 is imported
-only when `--model` is supplied.
+only when `--model` is supplied. The session header displays both the raw
+factorized policy action and its exact native button combination.
 
 Open `http://<device-tailscale-ip>:8765/` from another device on the same
 tailnet. The service has no authentication of its own, so keep it on a trusted

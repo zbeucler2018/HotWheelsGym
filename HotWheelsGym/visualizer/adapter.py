@@ -35,6 +35,7 @@ from ..ram_opponent_control import (
     normalize_racer_action,
     ordered_other_slots,
     player_buttons_from_action,
+    racer_action_buttons,
     read_racer_states,
 )
 from ..track_reference import (
@@ -534,6 +535,11 @@ class ObservationVisualizerAdapter:
                 self.policy_action_repeat if self.policy is not None else None
             ),
             "policy_action": list(self._current_action),
+            "policy_action_buttons": list(
+                racer_action_buttons(self._current_action)
+                if self.policy is not None
+                else ()
+            ),
         }
 
     def snapshot(self) -> VisualizerSnapshot:

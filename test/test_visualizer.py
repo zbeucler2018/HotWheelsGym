@@ -258,6 +258,9 @@ print(json.dumps({
         self.assertEqual(env.actions, [expected_buttons] * 5)
         self.assertTrue(result.metadata["policy_enabled"])
         self.assertEqual(result.metadata["policy_action"], [1, 2, 1])
+        self.assertEqual(
+            result.metadata["policy_action_buttons"], ["A", "RIGHT", "L", "R"]
+        )
         self.assertEqual(result.metadata["policy_action_repeat"], 4)
         named = result.named_observation
         self.assertEqual(named["previous_drive_accelerate"], 1.0)
