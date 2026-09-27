@@ -41,6 +41,8 @@ class PlaybackController:
         self._playing = False
         self._closed = False
         self._speed = 1.0
+        self._generation = 0
+        self._last_error: str | None = None
         # The game presents at 30 FPS, so publish a fresh framebuffer every two
         # 60 Hz raw frames while retaining the model's independent 4-frame hold.
         self._frames_per_tick = 2
@@ -53,15 +55,22 @@ class PlaybackController:
         with self._condition:
             self._speed = speed
             self._playing = True
+            self._last_error = None
+            self._generation += 1
             self._condition.notify_all()
 
     def pause(self) -> None:
         with self._condition:
             self._playing = False
+            self._generation += 1
 
-    def status(self) -> dict[str, float | bool]:
+    def status(self) -> dict[str, Any]:
         with self._condition:
-            return {"playing": self._playing, "speed": self._speed}
+            return {
+                "playing": self._playing,
+                "speed": self._speed,
+                "error": self._last_error,
+            }
 
     def close(self) -> None:
         with self._condition:
@@ -78,9 +87,20 @@ class PlaybackController:
                 if self._closed:
                     return
                 speed = self._speed
+                generation = self._generation
             started = monotonic()
-            with self.lock:
-                self.adapter.step(self._frames_per_tick)
+            try:
+                with self.lock:
+                    with self._condition:
+                        if not self._playing or generation != self._generation:
+                            continue
+                    self.adapter.step(self._frames_per_tick)
+            except Exception as error:  # keep control/UI available after telemetry faults
+                with self._condition:
+                    self._playing = False
+                    self._last_error = str(error)
+                    self._generation += 1
+                continue
             target_seconds = self._frames_per_tick / (60.0 * speed)
             remaining = target_seconds - (monotonic() - started)
             if remaining > 0:

@@ -373,6 +373,10 @@ function render(snapshot, updateFrame = !streamConnected) {
   renderObservation(snapshot);
   renderGeometry(snapshot);
   renderHistory(snapshot);
+  if (snapshot.playback?.error) {
+    setStatus(`Playback stopped: ${snapshot.playback.error}`, true);
+    stopPlaying();
+  }
 }
 
 function stopPlaying() {
