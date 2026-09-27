@@ -706,11 +706,13 @@ def read_racer_states(race: RaceMemory) -> dict[int, RacerState]:
     return {racer.slot: race.state(racer.slot) for racer in race.layout.racers}
 
 
-def _ordered_other_slots(
+def ordered_other_slots(
     controlled_slot: int,
     states: Mapping[int, RacerState],
     progress: RaceProgressTracker,
 ) -> tuple[int, ...]:
+    """Order the other three racers exactly as the observation contract does."""
+
     if controlled_slot not in states:
         raise ValueError(f"controlled racer slot {controlled_slot} is missing")
     if len(states) != 4:
@@ -725,6 +727,10 @@ def _ordered_other_slots(
             ),
         )
     )
+
+
+# Compatibility for older internal callers; new tooling should use the public name.
+_ordered_other_slots = ordered_other_slots
 
 
 def build_dino_ram_observation(
@@ -789,7 +795,7 @@ def build_dino_ram_observation(
     right_x, right_z = cos(angle), -sin(angle)
     own_total = progress.total_progress(controlled_slot, state)
 
-    for other_slot in _ordered_other_slots(controlled_slot, states, progress):
+    for other_slot in ordered_other_slots(controlled_slot, states, progress):
         other = states[other_slot]
         dx = other.x - state.x
         dz = other.z - state.z
@@ -913,7 +919,7 @@ def build_track_ram_observation(
     forward_x, forward_z = sin(angle), cos(angle)
     right_x, right_z = cos(angle), -sin(angle)
     own_total = progress.total_progress(controlled_slot, state)
-    for other_slot in _ordered_other_slots(controlled_slot, states, progress):
+    for other_slot in ordered_other_slots(controlled_slot, states, progress):
         other = states[other_slot]
         dx = other.x - state.x
         dz = other.z - state.z

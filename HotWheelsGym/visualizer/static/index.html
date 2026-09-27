@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HotWheelsGym RAM Observation</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <h1>RAM Observation Debugger</h1>
+      <p id="session-meta">Loading race state…</p>
+    </div>
+    <div id="status" role="status">Connecting</div>
+  </header>
+
+  <nav class="controls" aria-label="Playback controls">
+    <label>Controlled racer
+      <select id="controlled-slot">
+        <option value="0">Slot 0 · Player 1</option>
+        <option value="1">Slot 1</option>
+        <option value="2">Slot 2</option>
+        <option value="3">Slot 3</option>
+      </select>
+    </label>
+    <label>Frames per step
+      <input id="step-frames" type="number" min="1" max="600" value="1" inputmode="numeric">
+    </label>
+    <label>Playback speed
+      <select id="playback-speed">
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+      </select>
+    </label>
+    <button id="reset" type="button">Reset</button>
+    <button id="step" type="button">Step</button>
+    <button id="play" type="button" aria-pressed="false">Play</button>
+  </nav>
+
+  <main>
+    <section class="primary-grid">
+      <article class="panel frame-panel">
+        <div class="panel-heading">
+          <h2>Game Frame</h2>
+          <span id="frame-number">Frame 0</span>
+        </div>
+        <div class="frame-wrap"><img id="game-frame" alt="Current game framebuffer"></div>
+      </article>
+
+      <article class="panel geometry-panel">
+        <div class="panel-heading">
+          <h2>RAM-derived local geometry</h2>
+          <span id="progress-index">Reference 0</span>
+        </div>
+        <canvas id="geometry" aria-label="Player-centric RAM-derived track geometry"></canvas>
+        <div class="geometry-legend" aria-label="Geometry legend">
+          <span class="legend-controlled">controlled</span>
+          <span class="legend-track">centerline</span>
+          <span class="legend-tangent">tangent</span>
+          <span class="legend-nearby">nearby racers</span>
+          <span class="legend-pickup">pickup</span>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel history-panel">
+      <div class="panel-heading">
+        <h2>Rolling history</h2>
+        <span>last 500 frames</span>
+      </div>
+      <div id="history-grid" class="history-grid"></div>
+    </section>
+
+    <section class="panel observation-panel">
+      <div class="panel-heading">
+        <h2>Canonical 67-D observation</h2>
+        <span id="observation-count">0 values</span>
+      </div>
+      <div id="observation-groups" class="observation-groups"></div>
+    </section>
+  </main>
+
+  <template id="value-row-template">
+    <div class="value-row"><code></code><output></output></div>
+  </template>
+  <script src="/app.js"></script>
+</body>
+</html>

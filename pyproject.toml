@@ -36,7 +36,10 @@ train = [
 
 # Specify the HotWheelsGym package
 [tool.setuptools.packages.find]
-include = ["HotWheelsGym"]
+include = ["HotWheelsGym", "HotWheelsGym.*"]
+
+[tool.setuptools.package-data]
+"HotWheelsGym.visualizer" = ["README.md", "static/*"]
 
 # Use setuptools
 [build-system]
