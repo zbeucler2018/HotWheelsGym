@@ -58,7 +58,9 @@ and rolling history. The HTTP layer consumes this snapshot and does not import
 or reconstruct observation math.
 
 Static/reset/step/playback and racer-slot selection are supported. Playback is
-clocked by the Python server at 60 raw frames/second for 1x speed; the browser
-only polls display snapshots, so Tailnet latency does not slow emulation.
+clocked by the Python server at 60 raw frames/second for 1x speed. A same-origin
+WebSocket streams framebuffer updates at up to the game's 30 FPS while sending
+the heavier semantic observation/geometry payload at 2 Hz, so Tailnet latency
+does not clock the emulator or force a full diagnostic redraw for every frame.
 Attaching to
 an independently running environment is not currently implemented.

@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import struct
 from threading import Condition, RLock, Thread
-from time import monotonic
+from time import monotonic, sleep
 from typing import Any
 from urllib.parse import urlparse
 import zlib
@@ -24,6 +26,9 @@ STATIC_FILES = {
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/styles.css": ("styles.css", "text/css; charset=utf-8"),
 }
+WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+STREAM_FRAME_INTERVAL = 1.0 / 30.0
+STREAM_SEMANTIC_INTERVAL = 0.5
 
 
 class PlaybackController:
@@ -36,7 +41,9 @@ class PlaybackController:
         self._playing = False
         self._closed = False
         self._speed = 1.0
-        self._frames_per_tick = 4
+        # The game presents at 30 FPS, so publish a fresh framebuffer every two
+        # 60 Hz raw frames while retaining the model's independent 4-frame hold.
+        self._frames_per_tick = 2
         self._thread = Thread(target=self._run, name="ram-visualizer-playback", daemon=True)
         self._thread.start()
 
@@ -106,6 +113,20 @@ def encode_png(framebuffer: np.ndarray) -> bytes:
     ) + _png_chunk(b"IEND", b"")
 
 
+def encode_websocket_frame(payload: bytes, *, opcode: int) -> bytes:
+    """Encode one unmasked RFC 6455 server-to-browser frame."""
+
+    if not 0 <= opcode <= 0xF:
+        raise ValueError("WebSocket opcode must fit in four bits")
+    length = len(payload)
+    header = bytes((0x80 | opcode,))
+    if length < 126:
+        return header + bytes((length,)) + payload
+    if length <= 0xFFFF:
+        return header + bytes((126,)) + struct.pack(">H", length) + payload
+    return header + bytes((127,)) + struct.pack(">Q", length) + payload
+
+
 def create_server(
     adapter: ObservationVisualizerAdapter,
     *,
@@ -163,6 +184,56 @@ def create_server(
                 raise ValueError("request body must be a JSON object")
             return value
 
+        def _websocket_stream(self) -> None:
+            key = self.headers.get("Sec-WebSocket-Key")
+            if self.headers.get("Upgrade", "").lower() != "websocket" or not key:
+                self._json({"error": "WebSocket upgrade required"}, HTTPStatus.BAD_REQUEST)
+                return
+            accept = base64.b64encode(
+                hashlib.sha1((key + WEBSOCKET_GUID).encode("ascii")).digest()
+            ).decode("ascii")
+            self.send_response(HTTPStatus.SWITCHING_PROTOCOLS)
+            self.send_header("Upgrade", "websocket")
+            self.send_header("Connection", "Upgrade")
+            self.send_header("Sec-WebSocket-Accept", accept)
+            self.end_headers()
+            self.close_connection = True
+
+            last_revision = -1
+            last_semantic = 0.0
+            try:
+                while True:
+                    started = monotonic()
+                    with lock:
+                        snapshot = adapter.snapshot()
+                        revision = snapshot.revision
+                        framebuffer = (
+                            snapshot.framebuffer.copy()
+                            if revision != last_revision
+                            else None
+                        )
+                        semantic = (
+                            self._snapshot_payload()
+                            if started - last_semantic >= STREAM_SEMANTIC_INTERVAL
+                            else None
+                        )
+                    if semantic is not None:
+                        body = json.dumps(semantic, separators=(",", ":")).encode("utf-8")
+                        self.connection.sendall(
+                            encode_websocket_frame(body, opcode=0x1)
+                        )
+                        last_semantic = started
+                    if framebuffer is not None:
+                        self.connection.sendall(
+                            encode_websocket_frame(encode_png(framebuffer), opcode=0x2)
+                        )
+                        last_revision = revision
+                    remaining = STREAM_FRAME_INTERVAL - (monotonic() - started)
+                    if remaining > 0:
+                        sleep(remaining)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return
+
         def do_GET(self) -> None:
             path = urlparse(self.path).path
             try:
@@ -175,6 +246,9 @@ def create_server(
                         content_type,
                         cache="no-cache",
                     )
+                    return
+                if path == "/ws":
+                    self._websocket_stream()
                     return
                 if path == "/api/snapshot":
                     with lock:

@@ -26,7 +26,7 @@ from HotWheelsGym.ram_opponent_control import (
 )
 from HotWheelsGym.track_reference import track_reference_profile
 from HotWheelsGym.visualizer import ObservationVisualizerAdapter
-from HotWheelsGym.visualizer.server import encode_png
+from HotWheelsGym.visualizer.server import encode_png, encode_websocket_frame
 
 ROOT = Path(__file__).resolve().parents[1]
 INTEGRATION = ROOT / "HotWheelsGym" / "HotWheelsStuntTrackChallenge-GbAdvance"
@@ -209,6 +209,14 @@ print(json.dumps({
         self.assertTrue(encoded.startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertIn(b"IHDR", encoded)
         self.assertTrue(encoded.endswith(b"IEND\xaeB`\x82"))
+
+    def test_websocket_server_frames_cover_all_payload_lengths(self):
+        small = encode_websocket_frame(b"abc", opcode=0x2)
+        self.assertEqual(small, b"\x82\x03abc")
+        medium = encode_websocket_frame(b"x" * 126, opcode=0x1)
+        self.assertEqual(medium[:4], b"\x81\x7e\x00\x7e")
+        large = encode_websocket_frame(b"x" * 65_536, opcode=0x2)
+        self.assertEqual(large[:10], b"\x82\x7f" + struct.pack(">Q", 65_536))
 
     def test_optional_policy_receives_exact_67d_observation_and_repeats_action(self):
         class FakePolicy:

@@ -23,6 +23,9 @@ let current = null;
 let playing = false;
 let busy = false;
 let playTimer = null;
+let stream = null;
+let streamConnected = false;
+let frameObjectUrl = null;
 
 function setStatus(text, error = false) {
   ui.status.textContent = text;
@@ -295,10 +298,10 @@ function renderHistory(snapshot) {
   }
 }
 
-function render(snapshot) {
+function render(snapshot, updateFrame = !streamConnected) {
   current = snapshot;
   ui.slot.value = String(snapshot.controlled_slot);
-  ui.frame.src = snapshot.frame_url;
+  if (updateFrame) ui.frame.src = snapshot.frame_url;
   ui.frameNumber.textContent = `Frame ${snapshot.raw_frame}`;
   ui.progressIndex.textContent = `Reference ${snapshot.geometry.progress_index}`;
   const policy = snapshot.metadata.policy_enabled
@@ -320,6 +323,7 @@ function stopPlaying() {
 
 async function playbackPoll() {
   if (!playing) return;
+  if (streamConnected) return;
   try {
     const snapshot = await request("/api/snapshot");
     render(snapshot);
@@ -329,6 +333,42 @@ async function playbackPoll() {
   }
   if (!playing) return;
   playTimer = setTimeout(playbackPoll, 250);
+}
+
+function showStreamFrame(data) {
+  const nextUrl = URL.createObjectURL(new Blob([data], { type: "image/png" }));
+  const previousUrl = frameObjectUrl;
+  frameObjectUrl = nextUrl;
+  ui.frame.onload = () => {
+    if (previousUrl) URL.revokeObjectURL(previousUrl);
+  };
+  ui.frame.src = nextUrl;
+}
+
+function connectStream() {
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  stream = new WebSocket(`${protocol}//${location.host}/ws`);
+  stream.binaryType = "arraybuffer";
+  stream.addEventListener("open", () => {
+    streamConnected = true;
+    clearTimeout(playTimer);
+    playTimer = null;
+  });
+  stream.addEventListener("message", event => {
+    if (typeof event.data === "string") {
+      const snapshot = JSON.parse(event.data);
+      render(snapshot, false);
+      return;
+    }
+    showStreamFrame(event.data);
+  });
+  stream.addEventListener("close", () => {
+    streamConnected = false;
+    stream = null;
+    if (playing) playbackPoll();
+    setTimeout(connectStream, 1000);
+  });
+  stream.addEventListener("error", () => stream?.close());
 }
 
 ui.reset.addEventListener("click", () => { stopPlaying(); runAction("/api/reset", { controlled_slot: Number(ui.slot.value) }); });
@@ -345,7 +385,7 @@ ui.play.addEventListener("click", async () => {
   ui.play.setAttribute("aria-pressed", "true");
   setStatus("Playing on server");
   await runAction("/api/play", { speed: Number(ui.speed.value) || 1 });
-  playbackPoll();
+  if (!streamConnected) playbackPoll();
 });
 ui.speed.addEventListener("change", () => {
   if (playing) runAction("/api/play", { speed: Number(ui.speed.value) || 1 });
@@ -357,6 +397,7 @@ new ResizeObserver(() => {
   renderHistory(current);
 }).observe(document.querySelector("main"));
 
+connectStream();
 request("/api/snapshot")
   .then(snapshot => {
     render(snapshot);
