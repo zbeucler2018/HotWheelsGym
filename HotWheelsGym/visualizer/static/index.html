@@ -55,6 +55,20 @@
           <h2>RAM-derived local geometry</h2>
           <span id="progress-index">Reference 0</span>
         </div>
+        <details class="geometry-layers" open>
+          <summary>Geometry layers</summary>
+          <div class="geometry-layer-options">
+            <label><input type="checkbox" data-geometry-layer="grid" checked> Grid</label>
+            <label><input type="checkbox" data-geometry-layer="centerline" checked> Centerline</label>
+            <label><input type="checkbox" data-geometry-layer="pose" checked> Pose vectors</label>
+            <label><input type="checkbox" data-geometry-layer="short" checked> Short target</label>
+            <label><input type="checkbox" data-geometry-layer="medium" checked> Medium target</label>
+            <label><input type="checkbox" data-geometry-layer="long" checked> Long target</label>
+            <label><input type="checkbox" data-geometry-layer="racers" checked> Nearby racers</label>
+            <label><input type="checkbox" data-geometry-layer="pickup" checked> Pickup</label>
+            <label><input type="checkbox" data-geometry-layer="overlays" checked> Labels + metrics</label>
+          </div>
+        </details>
         <canvas id="geometry" aria-label="Player-centric RAM-derived track geometry"></canvas>
         <div class="geometry-legend" aria-label="Geometry legend">
           <span class="legend-controlled">controlled</span>

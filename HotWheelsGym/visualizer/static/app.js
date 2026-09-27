@@ -26,6 +26,32 @@ let playTimer = null;
 let stream = null;
 let streamConnected = false;
 let frameObjectUrl = null;
+const geometryLayerInputs = [...document.querySelectorAll("[data-geometry-layer]")];
+
+try {
+  const savedLayers = JSON.parse(localStorage.getItem("hotwheels-geometry-layers") || "{}");
+  for (const input of geometryLayerInputs) {
+    if (typeof savedLayers[input.dataset.geometryLayer] === "boolean") {
+      input.checked = savedLayers[input.dataset.geometryLayer];
+    }
+  }
+} catch (_) {
+  // Invalid or unavailable local storage should not block the debugger.
+}
+
+function geometryLayerEnabled(name) {
+  return document.querySelector(`[data-geometry-layer="${name}"]`)?.checked ?? true;
+}
+
+for (const input of geometryLayerInputs) {
+  input.addEventListener("change", () => {
+    const settings = Object.fromEntries(
+      geometryLayerInputs.map(item => [item.dataset.geometryLayer, item.checked]),
+    );
+    try { localStorage.setItem("hotwheels-geometry-layers", JSON.stringify(settings)); } catch (_) {}
+    if (current) renderGeometry(current);
+  });
+}
 
 function setStatus(text, error = false) {
   ui.status.textContent = text;
@@ -130,12 +156,14 @@ function drawArrow(context, from, to, color, label, dashed = false) {
 function renderGeometry(snapshot) {
   const { context, width, height } = setupCanvas(ui.geometry);
   const geometry = snapshot.geometry;
-  const points = [
-    ...geometry.centerline,
-    ...geometry.lookahead_targets.map(target => target.point),
-    geometry.pickup.point,
-    ...snapshot.racers.map(racer => racer.local),
-  ];
+  const points = [];
+  if (geometryLayerEnabled("centerline")) points.push(...geometry.centerline);
+  for (const target of geometry.lookahead_targets) {
+    if (geometryLayerEnabled(target.label)) points.push(target.point);
+  }
+  if (geometryLayerEnabled("pose")) points.push(geometry.projected_point);
+  if (geometryLayerEnabled("pickup")) points.push(geometry.pickup.point);
+  if (geometryLayerEnabled("racers")) points.push(...snapshot.racers.map(racer => racer.local));
   const maxMagnitude = Math.max(3, ...points.flatMap(point => [Math.abs(point.right), Math.abs(point.forward)]));
   const scale = Math.min(width, height) * .42 / (maxMagnitude * 1.08);
   const origin = { x: width / 2, y: height / 2 };
@@ -146,45 +174,53 @@ function renderGeometry(snapshot) {
   context.fillRect(0, 0, width, height);
 
   const gridStep = Math.max(1, Math.pow(2, Math.ceil(Math.log2(maxMagnitude / 6))));
-  context.strokeStyle = "rgba(116, 157, 171, .14)";
-  context.lineWidth = 1;
-  for (let value = -maxMagnitude; value <= maxMagnitude; value += gridStep) {
-    const x = origin.x + value * scale;
-    const y = origin.y - value * scale;
-    context.beginPath(); context.moveTo(x, 0); context.lineTo(x, height); context.stroke();
-    context.beginPath(); context.moveTo(0, y); context.lineTo(width, y); context.stroke();
+  if (geometryLayerEnabled("grid")) {
+    context.strokeStyle = "rgba(116, 157, 171, .14)";
+    context.lineWidth = 1;
+    for (let value = -maxMagnitude; value <= maxMagnitude; value += gridStep) {
+      const x = origin.x + value * scale;
+      const y = origin.y - value * scale;
+      context.beginPath(); context.moveTo(x, 0); context.lineTo(x, height); context.stroke();
+      context.beginPath(); context.moveTo(0, y); context.lineTo(width, y); context.stroke();
+    }
   }
 
-  context.strokeStyle = "#4ad7e8";
-  context.lineWidth = 3;
-  context.beginPath();
-  geometry.centerline.forEach((point, index) => {
-    const p = screen(point);
-    if (index === 0) context.moveTo(p.x, p.y); else context.lineTo(p.x, p.y);
-  });
-  context.stroke();
+  if (geometryLayerEnabled("centerline")) {
+    context.strokeStyle = "#4ad7e8";
+    context.lineWidth = 3;
+    context.beginPath();
+    geometry.centerline.forEach((point, index) => {
+      const p = screen(point);
+      if (index === 0) context.moveTo(p.x, p.y); else context.lineTo(p.x, p.y);
+    });
+    context.stroke();
+  }
 
   const projection = screen(geometry.projected_point);
-  context.fillStyle = "#ffc857";
-  context.beginPath(); context.arc(projection.x, projection.y, 5, 0, Math.PI * 2); context.fill();
-  drawArrow(context, projection, origin, "#ffc857", `lateral ${formatValue(geometry.lateral_offset)}`);
-  const tangent = geometry.track_tangent;
-  drawArrow(context, projection, {
-    x: projection.x + tangent.right * 55,
-    y: projection.y - tangent.forward * 55,
-  }, "#ffc857", "tangent");
+  if (geometryLayerEnabled("pose")) {
+    context.fillStyle = "#ffc857";
+    context.beginPath(); context.arc(projection.x, projection.y, 5, 0, Math.PI * 2); context.fill();
+    drawArrow(context, projection, origin, "#ffc857", geometryLayerEnabled("overlays") ? `lateral ${formatValue(geometry.lateral_offset)}` : "");
+    const tangent = geometry.track_tangent;
+    drawArrow(context, projection, {
+      x: projection.x + tangent.right * 55,
+      y: projection.y - tangent.forward * 55,
+    }, "#ffc857", geometryLayerEnabled("overlays") ? "tangent" : "");
+  }
 
   const targetColors = { short: "#64a8ff", medium: "#be95ff", long: "#ff9f68" };
   for (const target of geometry.lookahead_targets) {
+    if (!geometryLayerEnabled(target.label)) continue;
     const point = screen(target.point);
     const values = target.observation;
-    drawArrow(context, origin, point, targetColors[target.label], target.label);
+    drawArrow(context, origin, point, targetColors[target.label], geometryLayerEnabled("overlays") ? target.label : "");
     context.fillStyle = targetColors[target.label];
     context.beginPath(); context.arc(point.x, point.y, 4, 0, Math.PI * 2); context.fill();
   }
 
   const nearbyCallouts = [];
   for (const racer of snapshot.racers) {
+    if (!racer.controlled && !geometryLayerEnabled("racers")) continue;
     const point = screen(racer.local);
     const color = racer.controlled ? "#6ce59b" : "#be95ff";
     context.fillStyle = color;
@@ -194,77 +230,87 @@ function renderGeometry(snapshot) {
       y: point.y - racer.heading.forward * 34,
     }, color, "");
     if (racer.controlled) {
-      context.fillStyle = color;
-      context.font = "11px ui-monospace, monospace";
-      context.fillText("controlled", point.x + 8, point.y - 12);
+      if (geometryLayerEnabled("overlays")) {
+        context.fillStyle = color;
+        context.font = "11px ui-monospace, monospace";
+        context.fillText("controlled", point.x + 8, point.y - 12);
+      }
     } else {
       nearbyCallouts.push({ racer, point });
     }
   }
 
-  drawArrow(context, origin, { x: origin.x, y: origin.y - 62 }, "#6ce59b", "forward");
-  drawArrow(context, origin, { x: origin.x + 62, y: origin.y }, "#4ad7e8", "right");
+  if (geometryLayerEnabled("pose")) {
+    drawArrow(context, origin, { x: origin.x, y: origin.y - 62 }, "#6ce59b", geometryLayerEnabled("overlays") ? "forward" : "");
+    drawArrow(context, origin, { x: origin.x + 62, y: origin.y }, "#4ad7e8", geometryLayerEnabled("overlays") ? "right" : "");
+  }
 
-  const pickup = screen(geometry.pickup.point);
-  drawArrow(context, origin, pickup, geometry.pickup.available ? "#ff7485" : "#777f84",
-    "pickup", true);
-  context.save();
-  context.translate(pickup.x, pickup.y); context.rotate(Math.PI / 4);
-  context.fillStyle = geometry.pickup.available ? "#ff7485" : "#777f84";
-  context.fillRect(-6, -6, 12, 12); context.restore();
+  if (geometryLayerEnabled("pickup")) {
+    const pickup = screen(geometry.pickup.point);
+    drawArrow(context, origin, pickup, geometry.pickup.available ? "#ff7485" : "#777f84",
+      geometryLayerEnabled("overlays") ? "pickup" : "", true);
+    context.save();
+    context.translate(pickup.x, pickup.y); context.rotate(Math.PI / 4);
+    context.fillStyle = geometry.pickup.available ? "#ff7485" : "#777f84";
+    context.fillRect(-6, -6, 12, 12); context.restore();
+  }
 
-  const calloutWidth = Math.min(285, width - 24);
-  const calloutHeight = 16 + nearbyCallouts.length * 29;
-  const calloutX = 12;
-  const calloutY = height - calloutHeight - 31;
-  context.fillStyle = "rgba(4, 12, 16, .84)";
-  context.fillRect(calloutX, calloutY, calloutWidth, calloutHeight);
-  nearbyCallouts.forEach(({ racer, point }, index) => {
-    const rowY = calloutY + 18 + index * 29;
-    context.strokeStyle = "rgba(190, 149, 255, .55)";
-    context.lineWidth = 1;
-    context.beginPath();
-    context.moveTo(point.x, point.y);
-    context.lineTo(calloutX + calloutWidth, rowY - 4);
-    context.stroke();
-    context.fillStyle = "#be95ff";
-    context.font = "10px ui-monospace, monospace";
-    context.fillText(racer.label, calloutX + 8, rowY - 5);
-    context.fillStyle = "#d8c9ff";
-    context.fillText(
-      `f ${formatValue(racer.observation.forward)}  r ${formatValue(racer.observation.right)}  d ${formatValue(racer.observation.distance)}  Δp ${formatValue(racer.observation.relative_progress)}`,
-      calloutX + 8, rowY + 7,
-    );
-  });
+  if (geometryLayerEnabled("racers") && geometryLayerEnabled("overlays")) {
+    const calloutWidth = Math.min(285, width - 24);
+    const calloutHeight = 16 + nearbyCallouts.length * 29;
+    const calloutX = 12;
+    const calloutY = height - calloutHeight - 31;
+    context.fillStyle = "rgba(4, 12, 16, .84)";
+    context.fillRect(calloutX, calloutY, calloutWidth, calloutHeight);
+    nearbyCallouts.forEach(({ racer, point }, index) => {
+      const rowY = calloutY + 18 + index * 29;
+      context.strokeStyle = "rgba(190, 149, 255, .55)";
+      context.lineWidth = 1;
+      context.beginPath();
+      context.moveTo(point.x, point.y);
+      context.lineTo(calloutX + calloutWidth, rowY - 4);
+      context.stroke();
+      context.fillStyle = "#be95ff";
+      context.font = "10px ui-monospace, monospace";
+      context.fillText(racer.label, calloutX + 8, rowY - 5);
+      context.fillStyle = "#d8c9ff";
+      context.fillText(
+        `f ${formatValue(racer.observation.forward)}  r ${formatValue(racer.observation.right)}  d ${formatValue(racer.observation.distance)}  Δp ${formatValue(racer.observation.relative_progress)}`,
+        calloutX + 8, rowY + 7,
+      );
+    });
+  }
 
-  context.fillStyle = "#8faab2";
-  context.font = "11px ui-monospace, monospace";
-  context.fillText(`grid ${gridStep} local unit${gridStep === 1 ? "" : "s"}`, 12, height - 14);
-  context.fillText(`reference ${geometry.progress_index} + ${geometry.segment_fraction.toFixed(3)}`, 12, 18);
-
-  const metrics = [
-    ["heading error sin/cos", `${formatValue(geometry.heading_error.sin)} / ${formatValue(geometry.heading_error.cos)}`],
-    ...geometry.lookahead_targets.map(target => [
-      `${target.label} target f/r`,
-      `${formatValue(target.observation.forward)} / ${formatValue(target.observation.right)}`,
-    ]),
-    ["curvature med/long", `${formatValue(geometry.curvature.medium)} / ${formatValue(geometry.curvature.long)}`],
-    ["pickup Δp / lateral error", `${formatValue(geometry.pickup.progress_distance)} / ${formatValue(geometry.pickup.lateral_error)}`],
-  ];
-  const boxWidth = Math.min(245, width - 24);
-  const boxX = width - boxWidth - 12;
-  const boxY = 12;
-  context.fillStyle = "rgba(4, 12, 16, .84)";
-  context.fillRect(boxX, boxY, boxWidth, 18 + metrics.length * 17);
-  context.font = "10px ui-monospace, monospace";
-  metrics.forEach((metric, index) => {
+  if (geometryLayerEnabled("overlays")) {
     context.fillStyle = "#8faab2";
-    context.fillText(metric[0], boxX + 8, boxY + 15 + index * 17);
-    context.fillStyle = "#e8f4f6";
-    context.textAlign = "right";
-    context.fillText(metric[1], boxX + boxWidth - 8, boxY + 15 + index * 17);
-    context.textAlign = "left";
-  });
+    context.font = "11px ui-monospace, monospace";
+    if (geometryLayerEnabled("grid")) context.fillText(`grid ${gridStep} local unit${gridStep === 1 ? "" : "s"}`, 12, height - 14);
+    context.fillText(`reference ${geometry.progress_index} + ${geometry.segment_fraction.toFixed(3)}`, 12, 18);
+
+    const metrics = [
+      ["heading error sin/cos", `${formatValue(geometry.heading_error.sin)} / ${formatValue(geometry.heading_error.cos)}`],
+      ...geometry.lookahead_targets.map(target => [
+        `${target.label} target f/r`,
+        `${formatValue(target.observation.forward)} / ${formatValue(target.observation.right)}`,
+      ]),
+      ["curvature med/long", `${formatValue(geometry.curvature.medium)} / ${formatValue(geometry.curvature.long)}`],
+      ["pickup Δp / lateral error", `${formatValue(geometry.pickup.progress_distance)} / ${formatValue(geometry.pickup.lateral_error)}`],
+    ];
+    const boxWidth = Math.min(245, width - 24);
+    const boxX = width - boxWidth - 12;
+    const boxY = 12;
+    context.fillStyle = "rgba(4, 12, 16, .84)";
+    context.fillRect(boxX, boxY, boxWidth, 18 + metrics.length * 17);
+    context.font = "10px ui-monospace, monospace";
+    metrics.forEach((metric, index) => {
+      context.fillStyle = "#8faab2";
+      context.fillText(metric[0], boxX + 8, boxY + 15 + index * 17);
+      context.fillStyle = "#e8f4f6";
+      context.textAlign = "right";
+      context.fillText(metric[1], boxX + boxWidth - 8, boxY + 15 + index * 17);
+      context.textAlign = "left";
+    });
+  }
 }
 
 function renderHistory(snapshot) {
