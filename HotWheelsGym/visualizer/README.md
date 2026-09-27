@@ -57,5 +57,8 @@ pose/radar intermediates, racer-local geometry, dynamic nearby-racer ordering,
 and rolling history. The HTTP layer consumes this snapshot and does not import
 or reconstruct observation math.
 
-Static/reset/step/playback and racer-slot selection are supported. Attaching to
+Static/reset/step/playback and racer-slot selection are supported. Playback is
+clocked by the Python server at 60 raw frames/second for 1x speed; the browser
+only polls display snapshots, so Tailnet latency does not slow emulation.
+Attaching to
 an independently running environment is not currently implemented.

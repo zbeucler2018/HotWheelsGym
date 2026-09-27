@@ -46,7 +46,7 @@ async function runAction(path, body) {
   try {
     const payload = await request(path, { method: "POST", body: JSON.stringify(body) });
     render(payload);
-    setStatus(playing ? "Playing" : "Ready");
+    setStatus(playing ? "Playing on server" : "Ready");
   } catch (error) {
     setStatus(error.message, true);
     stopPlaying();
@@ -318,25 +318,37 @@ function stopPlaying() {
   ui.play.setAttribute("aria-pressed", "false");
 }
 
-async function playbackLoop() {
+async function playbackPoll() {
   if (!playing) return;
-  const frames = Math.max(1, Math.min(600, Number(ui.stepFrames.value) || 1));
-  await runAction("/api/step", { frames });
+  try {
+    const snapshot = await request("/api/snapshot");
+    render(snapshot);
+  } catch (error) {
+    setStatus(error.message, true);
+    stopPlaying();
+  }
   if (!playing) return;
-  const speed = Math.max(.25, Number(ui.speed.value) || 1);
-  playTimer = setTimeout(playbackLoop, 250 / speed);
+  playTimer = setTimeout(playbackPoll, 250);
 }
 
-ui.reset.addEventListener("click", () => runAction("/api/reset", { controlled_slot: Number(ui.slot.value) }));
-ui.step.addEventListener("click", () => runAction("/api/step", { frames: Number(ui.stepFrames.value) || 1 }));
+ui.reset.addEventListener("click", () => { stopPlaying(); runAction("/api/reset", { controlled_slot: Number(ui.slot.value) }); });
+ui.step.addEventListener("click", () => { stopPlaying(); runAction("/api/step", { frames: Number(ui.stepFrames.value) || 1 }); });
 ui.slot.addEventListener("change", () => runAction("/api/controlled-slot", { slot: Number(ui.slot.value) }));
-ui.play.addEventListener("click", () => {
-  if (playing) { stopPlaying(); setStatus("Ready"); return; }
+ui.play.addEventListener("click", async () => {
+  if (playing) {
+    stopPlaying();
+    await runAction("/api/pause", {});
+    return;
+  }
   playing = true;
   ui.play.textContent = "Pause";
   ui.play.setAttribute("aria-pressed", "true");
-  setStatus("Playing");
-  playbackLoop();
+  setStatus("Playing on server");
+  await runAction("/api/play", { speed: Number(ui.speed.value) || 1 });
+  playbackPoll();
+});
+ui.speed.addEventListener("change", () => {
+  if (playing) runAction("/api/play", { speed: Number(ui.speed.value) || 1 });
 });
 
 new ResizeObserver(() => {
@@ -346,5 +358,16 @@ new ResizeObserver(() => {
 }).observe(document.querySelector("main"));
 
 request("/api/snapshot")
-  .then(snapshot => { render(snapshot); setStatus("Ready"); })
+  .then(snapshot => {
+    render(snapshot);
+    if (snapshot.playback?.playing) {
+      playing = true;
+      ui.play.textContent = "Pause";
+      ui.play.setAttribute("aria-pressed", "true");
+      setStatus("Playing on server");
+      playbackPoll();
+    } else {
+      setStatus("Ready");
+    }
+  })
   .catch(error => setStatus(error.message, true));

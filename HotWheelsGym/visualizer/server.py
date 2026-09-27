@@ -7,7 +7,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import struct
-from threading import RLock
+from threading import Condition, RLock, Thread
+from time import monotonic
 from typing import Any
 from urllib.parse import urlparse
 import zlib
@@ -23,6 +24,61 @@ STATIC_FILES = {
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/styles.css": ("styles.css", "text/css; charset=utf-8"),
 }
+
+
+class PlaybackController:
+    """Advance the emulator independently of browser/network round trips."""
+
+    def __init__(self, adapter: ObservationVisualizerAdapter, lock: RLock) -> None:
+        self.adapter = adapter
+        self.lock = lock
+        self._condition = Condition()
+        self._playing = False
+        self._closed = False
+        self._speed = 1.0
+        self._frames_per_tick = 4
+        self._thread = Thread(target=self._run, name="ram-visualizer-playback", daemon=True)
+        self._thread.start()
+
+    def play(self, speed: float) -> None:
+        if not 0.25 <= speed <= 8.0:
+            raise ValueError("playback speed must be in 0.25..8")
+        with self._condition:
+            self._speed = speed
+            self._playing = True
+            self._condition.notify_all()
+
+    def pause(self) -> None:
+        with self._condition:
+            self._playing = False
+
+    def status(self) -> dict[str, float | bool]:
+        with self._condition:
+            return {"playing": self._playing, "speed": self._speed}
+
+    def close(self) -> None:
+        with self._condition:
+            self._closed = True
+            self._playing = False
+            self._condition.notify_all()
+        self._thread.join(timeout=2.0)
+
+    def _run(self) -> None:
+        while True:
+            with self._condition:
+                while not self._playing and not self._closed:
+                    self._condition.wait()
+                if self._closed:
+                    return
+                speed = self._speed
+            started = monotonic()
+            with self.lock:
+                self.adapter.step(self._frames_per_tick)
+            target_seconds = self._frames_per_tick / (60.0 * speed)
+            remaining = target_seconds - (monotonic() - started)
+            if remaining > 0:
+                with self._condition:
+                    self._condition.wait(timeout=remaining)
 
 
 def _png_chunk(kind: bytes, payload: bytes) -> bytes:
@@ -59,6 +115,7 @@ def create_server(
     """Create the local server without starting its blocking serve loop."""
 
     lock = RLock()
+    playback = PlaybackController(adapter, lock)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "HotWheelsRAMVisualizer/1"
@@ -89,6 +146,11 @@ def create_server(
                 "application/json; charset=utf-8",
             )
 
+        def _snapshot_payload(self) -> dict[str, Any]:
+            payload = adapter.snapshot().payload()
+            payload["playback"] = playback.status()
+            return payload
+
         def _body(self) -> dict[str, Any]:
             length = int(self.headers.get("Content-Length", "0"))
             if length > 16_384:
@@ -116,7 +178,7 @@ def create_server(
                     return
                 if path == "/api/snapshot":
                     with lock:
-                        self._json(adapter.snapshot().payload())
+                        self._json(self._snapshot_payload())
                     return
                 if path == "/api/frame":
                     with lock:
@@ -133,6 +195,7 @@ def create_server(
                 body = self._body()
                 with lock:
                     if path == "/api/reset":
+                        playback.pause()
                         if "controlled_slot" in body:
                             slot = int(body["controlled_slot"])
                             if slot not in range(4):
@@ -142,19 +205,30 @@ def create_server(
                             adapter.controlled_slot = slot
                         snapshot = adapter.reset()
                     elif path == "/api/step":
+                        playback.pause()
                         snapshot = adapter.step(int(body.get("frames", 1)))
+                    elif path == "/api/play":
+                        playback.play(float(body.get("speed", 1.0)))
+                        snapshot = adapter.snapshot()
+                    elif path == "/api/pause":
+                        playback.pause()
+                        snapshot = adapter.snapshot()
                     elif path == "/api/controlled-slot":
                         snapshot = adapter.set_controlled_slot(int(body["slot"]))
                     else:
                         self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
                         return
-                self._json(snapshot.payload())
+                payload = snapshot.payload()
+                payload["playback"] = playback.status()
+                self._json(payload)
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
                 self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
             except Exception as error:  # pragma: no cover - defensive HTTP boundary
                 self._json({"error": str(error)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
-    return ThreadingHTTPServer((host, port), Handler)
+    server = ThreadingHTTPServer((host, port), Handler)
+    server.playback_controller = playback  # type: ignore[attr-defined]
+    return server
 
 
 def serve(
@@ -170,5 +244,6 @@ def serve(
     except KeyboardInterrupt:
         pass
     finally:
+        server.playback_controller.close()  # type: ignore[attr-defined]
         server.server_close()
         adapter.close()
